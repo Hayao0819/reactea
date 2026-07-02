@@ -226,3 +226,68 @@ func TestRouteWithParam(t *testing.T) {
 		t.Fatalf("got valid route message, but most likely wrong param")
 	}
 }
+
+// When more than one placeholder matches, the most specific (literal over
+// param) must win, deterministically across runs — not be picked at random by
+// Go's map iteration order.
+func TestRouteSpecificity(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		var in, out bytes.Buffer
+
+		in.WriteString("123")
+
+		root := &testComponenent{
+			router: NewWithRoutes(map[string]RouteInitializer{
+				"/user/:id": func(Params) reactea.Component {
+					return reactea.ComponentifyDumb(func() string { return "PARAM" })
+				},
+				"/user/settings": func(Params) reactea.Component {
+					return reactea.ComponentifyDumb(func() string { return "EXACT" })
+				},
+			}),
+		}
+
+		program := reactea.NewProgram(root, reactea.WithRoute("/user/settings"), tea.WithInput(&in), tea.WithOutput(&out))
+
+		if _, err := program.Run(); err != nil {
+			t.Fatal(err)
+		}
+
+		if !strings.Contains(out.String(), "EXACT") {
+			t.Fatalf("iteration %d: expected the exact route to win, got %q", i, out.String())
+		}
+
+		if strings.Contains(out.String(), "PARAM") {
+			t.Fatalf("iteration %d: param route was selected over the exact one, got %q", i, out.String())
+		}
+	}
+}
+
+// Specificity precedence: literal > param (":") > optional ("?:") > catch-all
+// ("+?:"); more segments beat fewer on an equal prefix; equal specificity is
+// broken deterministically by placeholder string.
+func TestRouteSpecificityRanking(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool // moreSpecific(a, b)
+	}{
+		{"/user/settings", "/user/:id", true}, // literal over param
+		{"/user/:id", "/user/settings", false},
+		{"/a/:x", "/a/?:x", true},   // param over optional
+		{"/a/?:x", "/a/+?:x", true}, // optional over catch-all
+		{"/a/b/c", "/a/b", true},    // more segments win
+		{"/a/b", "/a/b/c", false},
+		{"/a", "/b", true}, // tie broken by string order
+		{"/b", "/a", false},
+	}
+
+	for _, tc := range cases {
+		if got := moreSpecific(tc.a, tc.b); got != tc.want {
+			t.Errorf("moreSpecific(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// A re-route to an unmatched path (with no "default") must Destroy the current
+// component and fall back to the "Couldn't route" render, not keep rendering
+// the destroyed component.

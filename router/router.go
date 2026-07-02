@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/londek/reactea"
@@ -75,11 +76,93 @@ func (c *Component) initRoute() tea.Cmd {
 func (c *Component) findMatchingRouteInitializer() (RouteInitializer, Params, bool) {
 	currentRoute := reactea.CurrentRoute()
 
+	// Go randomizes map iteration order, so when more than one placeholder
+	// matches the current route we must not just return the first hit — that
+	// would pick a route at random. Instead choose the most specific match
+	// deterministically (literal segments beat params beat wildcards; ties are
+	// broken by placeholder string). "default" is handled as a fallback in
+	// initRoute and is never treated as a match here.
+	var (
+		bestPlaceholder string
+		bestInit        RouteInitializer
+		bestParams      Params
+		found           bool
+	)
+
 	for placeholder, initializer := range c.Routes {
-		if params, ok := reactea.RouteMatchesPlaceholder(currentRoute, placeholder); ok {
-			return initializer, params, true
+		if placeholder == "default" {
+			continue
+		}
+
+		params, ok := reactea.RouteMatchesPlaceholder(currentRoute, placeholder)
+		if !ok {
+			continue
+		}
+
+		if !found || moreSpecific(placeholder, bestPlaceholder) {
+			bestPlaceholder = placeholder
+			bestInit = initializer
+			bestParams = params
+			found = true
 		}
 	}
 
-	return nil, nil, false
+	return bestInit, bestParams, found
+}
+
+// moreSpecific reports whether route placeholder a is a strictly better match
+// than b. A placeholder is scored segment by segment (left to right): a literal
+// segment is more specific than a single-level param (":"), which beats an
+// optional param ("?:"), which beats a catch-all ("+?:"). More segments win
+// when one is a prefix of the other. Equal specificity is broken by string
+// order so selection is always deterministic.
+func moreSpecific(a, b string) bool {
+	switch compareSpecificity(routeSpecificity(a), routeSpecificity(b)) {
+	case 1:
+		return true
+	case -1:
+		return false
+	default:
+		return a < b
+	}
+}
+
+func routeSpecificity(placeholder string) []int {
+	levels := strings.Split(strings.TrimPrefix(placeholder, "/"), "/")
+	score := make([]int, len(levels))
+
+	for i, level := range levels {
+		switch {
+		case strings.HasPrefix(level, "+?:"):
+			score[i] = 0
+		case strings.HasPrefix(level, "?:"):
+			score[i] = 1
+		case strings.HasPrefix(level, ":"):
+			score[i] = 2
+		default:
+			score[i] = 3
+		}
+	}
+
+	return score
+}
+
+func compareSpecificity(a, b []int) int {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			if a[i] > b[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+
+	switch {
+	case len(a) > len(b):
+		return 1
+	case len(a) < len(b):
+		return -1
+	default:
+		return 0
+	}
 }
