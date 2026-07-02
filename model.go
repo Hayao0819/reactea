@@ -7,6 +7,13 @@ import (
 // Useful for constraining some actions to update-stage only
 var isUpdate bool
 
+// Internal message used to run teardown on the event-loop goroutine. The
+// destroyAppMsg path can't call root.Destroy() directly from execute's
+// goroutine, because that would race the event loop still calling
+// root.Update()/root.Render(). Instead execute forwards this marker back
+// through the program so Destroy() runs serialized inside Update().
+type destroyNowMsg struct{}
+
 type model struct {
 	program *tea.Program
 	root    Component
@@ -19,6 +26,14 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Teardown runs here, on the event-loop goroutine, so it can't interleave
+	// with root.Update()/root.Render(). tea.Quit then stops the loop, so no
+	// further Update lands on the destroyed component tree.
+	if _, ok := msg.(destroyNowMsg); ok {
+		m.root.Destroy()
+		return m, tea.Quit
+	}
+
 	wasRouteChanged = false
 
 	switch msg := msg.(type) {
@@ -57,8 +72,9 @@ func (m model) execute(cmd tea.Cmd) {
 		msg := cmd()
 		switch msg := msg.(type) {
 		case destroyAppMsg:
-			m.root.Destroy()
-			m.program.Send(tea.QuitMsg{})
+			// Don't Destroy() here — that would race the event loop. Hand
+			// teardown back to Update() via the program's message channel.
+			m.program.Send(destroyNowMsg{})
 		case tea.BatchMsg:
 			for _, cmd := range msg {
 				m.execute(cmd)
