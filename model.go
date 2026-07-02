@@ -1,6 +1,9 @@
 package reactea
 
 import (
+	"fmt"
+	"runtime/debug"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -69,6 +72,21 @@ func (m model) execute(cmd tea.Cmd) {
 	}
 
 	go func() {
+		// Bubbletea runs Update commands under a recover that restores the
+		// terminal on panic (see (*tea.Program).recoverFromPanic). Reactea runs
+		// them in its own goroutine, which bypasses that guard, so mirror it
+		// here — otherwise a panicking command (an HTTP call, a JSON decode, a
+		// stream read) crashes the process and leaves the terminal in raw or
+		// alt-screen mode. Kill() restores the terminal and makes Run() return
+		// ErrProgramKilled.
+		defer func() {
+			if r := recover(); r != nil {
+				m.program.Kill()
+				fmt.Printf("Caught panic:\n\n%s\n\nRestoring terminal...\n\n", r)
+				debug.PrintStack()
+			}
+		}()
+
 		msg := cmd()
 		switch msg := msg.(type) {
 		case destroyAppMsg:

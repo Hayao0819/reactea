@@ -2,6 +2,7 @@ package reactea
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,39 @@ func TestComponent(t *testing.T) {
 
 	if root.state.lastHeight != 1 {
 		t.Errorf("expected lastHeigth 1, but got %d", root.state.lastWidth)
+	}
+}
+
+// A panic in a command returned from Update must not crash the process with
+// the terminal left in raw/alt-screen mode. Reactea should restore the terminal
+// (via Kill) and let Run return, mirroring Bubbletea's own panic handling.
+func TestPanicInCommandRestoresTerminal(t *testing.T) {
+	root := &mockComponent[struct{}]{
+		updateFunc: func(c Component, s *struct{}, msg tea.Msg) tea.Cmd {
+			if _, ok := msg.(tea.KeyMsg); ok {
+				return func() tea.Msg { panic("boom from a command") }
+			}
+
+			return nil
+		},
+		renderFunc: func(c Component, s *struct{}, width, height int) string {
+			return "test"
+		},
+	}
+
+	program := NewProgram(root, WithoutInput(), tea.WithoutRenderer())
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		program.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	}()
+
+	_, err := program.Run()
+
+	// The process survived (no crash) and Run returned; Kill surfaces as
+	// ErrProgramKilled.
+	if !errors.Is(err, tea.ErrProgramKilled) {
+		t.Errorf("expected ErrProgramKilled after a panicking command, got %v", err)
 	}
 }
 
