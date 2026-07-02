@@ -60,6 +60,12 @@ func (c *Component) Render(width, height int) string {
 }
 
 func (c *Component) initRoute() tea.Cmd {
+	// Reset first so a failed (re-)route leaves currentComponent nil instead
+	// of a stale, already-Destroyed component. initRoute is only ever called
+	// after any previous component has been Destroyed (see Update), so this is
+	// safe.
+	c.currentComponent = nil
+
 	if initializer, params, ok := c.findMatchingRouteInitializer(); ok {
 		c.currentComponent = initializer(params)
 		return c.currentComponent.Init()

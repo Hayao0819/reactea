@@ -291,3 +291,35 @@ func TestRouteSpecificityRanking(t *testing.T) {
 // A re-route to an unmatched path (with no "default") must Destroy the current
 // component and fall back to the "Couldn't route" render, not keep rendering
 // the destroyed component.
+func TestFailedRerouteFallsBack(t *testing.T) {
+	var in, out bytes.Buffer
+
+	in.WriteString("123")
+
+	root := &testComponenent{
+		testUpdater: func(c *testComponenent) tea.Cmd {
+			if c.updateN == 0 {
+				reactea.SetRoute("/nowhere")
+
+				return nil
+			}
+
+			return reactea.Destroy
+		},
+		router: NewWithRoutes(map[string]RouteInitializer{
+			"/start": func(Params) reactea.Component {
+				return reactea.ComponentifyDumb(func() string { return "STARTED" })
+			},
+		}),
+	}
+
+	program := reactea.NewProgram(root, reactea.WithRoute("/start"), tea.WithInput(&in), tea.WithOutput(&out))
+
+	if _, err := program.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(out.String(), "Couldn't route for \"/nowhere\"") {
+		t.Fatalf("expected fallback render after a failed re-route, got %q", out.String())
+	}
+}
