@@ -19,7 +19,7 @@ func WithoutInput() func(*tea.Program) {
 
 func WithRoute(route string) func(*tea.Program) {
 	return func(*tea.Program) {
-		if len(route) != 0 || route[0] == '/' {
+		if len(route) != 0 && route[0] == '/' {
 			currentRoute = route
 		}
 	}
