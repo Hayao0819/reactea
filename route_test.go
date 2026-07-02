@@ -108,6 +108,56 @@ func TestNavigate(t *testing.T) {
 	}
 }
 
+// A change followed by a revert within a single Update must not report a net
+// route change, otherwise the router would needlessly Destroy and re-init the
+// current component.
+func TestSetRouteRevertWithinUpdate(t *testing.T) {
+	isUpdate = true // SetRoute panics outside an update; emulate being inside one
+
+	defer func() {
+		isUpdate = false
+		currentRoute = "/"
+		lastRoute = "/"
+		wasRouteChanged = false
+	}()
+
+	currentRoute = "/"
+	lastRoute = "/"
+	wasRouteChanged = false
+
+	SetRoute("/a")
+	if !WasRouteChanged() {
+		t.Fatalf("expected a route change after SetRoute(\"/a\")")
+	}
+	if CurrentRoute() != "/a" {
+		t.Fatalf("expected current route \"/a\", got %q", CurrentRoute())
+	}
+	if LastRoute() != "/" {
+		t.Fatalf("expected last route \"/\", got %q", LastRoute())
+	}
+
+	// Revert to the original route: the net change is nothing.
+	SetRoute("/")
+	if WasRouteChanged() {
+		t.Errorf("change-then-revert within one update must not report a change")
+	}
+	if CurrentRoute() != "/" {
+		t.Errorf("expected current route \"/\", got %q", CurrentRoute())
+	}
+
+	// A genuine subsequent change still registers, still relative to the
+	// pre-update route.
+	SetRoute("/b")
+	if !WasRouteChanged() {
+		t.Errorf("expected a route change after SetRoute(\"/b\")")
+	}
+	if LastRoute() != "/" {
+		t.Errorf("expected last route to stay \"/\", got %q", LastRoute())
+	}
+}
+
+// Navigate must not panic slicing currentRoute even if currentRoute is somehow
+// malformed (not root-prefixed).
 func TestRoutePlaceholderMatching(t *testing.T) {
 	testCases := []struct {
 		route, placeholder string

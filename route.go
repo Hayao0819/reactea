@@ -39,12 +39,18 @@ func SetRoute(target string) tea.Cmd {
 		panic("can't set route to non-root path")
 	}
 
+	// lastRoute captures the route as it was at the start of this Update
+	// (before the first change), so it survives multiple SetRoute calls.
 	if !wasRouteChanged {
-		wasRouteChanged = currentRoute != target
 		lastRoute = currentRoute
 	}
 
 	currentRoute = target
+
+	// Derive the change flag from the net result rather than latching on the
+	// first change, so a change-then-revert within one Update (e.g.
+	// SetRoute("/a") then SetRoute("/")) does not trigger a spurious re-route.
+	wasRouteChanged = currentRoute != lastRoute
 	return nil
 }
 
