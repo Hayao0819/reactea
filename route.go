@@ -66,8 +66,15 @@ func Navigate(target string) tea.Cmd {
 	if target[0] == '/' {
 		currentRouteLevels = []string{}
 	} else {
-		currentRouteLevels = strings.Split(currentRoute, "/")
-		currentRouteLevels = currentRouteLevels[1 : len(currentRouteLevels)-1]
+		// Strip the leading empty element (from the leading '/') and any
+		// trailing empty element. Guard the slice so a malformed currentRoute
+		// (e.g. one without a leading '/') can't trigger an out-of-range panic.
+		levels := strings.Split(currentRoute, "/")
+		if len(levels) >= 2 {
+			currentRouteLevels = levels[1 : len(levels)-1]
+		} else {
+			currentRouteLevels = []string{}
+		}
 	}
 
 	for _, targetLevel := range strings.Split(target, "/") {

@@ -158,6 +158,33 @@ func TestSetRouteRevertWithinUpdate(t *testing.T) {
 
 // Navigate must not panic slicing currentRoute even if currentRoute is somehow
 // malformed (not root-prefixed).
+func TestNavigateMalformedCurrentRoute(t *testing.T) {
+	isUpdate = true
+
+	defer func() {
+		isUpdate = false
+		currentRoute = "/"
+		lastRoute = "/"
+		wasRouteChanged = false
+	}()
+
+	currentRoute = "malformed"
+	lastRoute = "malformed"
+	wasRouteChanged = false
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Navigate panicked on malformed currentRoute: %v", r)
+		}
+	}()
+
+	Navigate("foo")
+
+	if CurrentRoute() != "/foo" {
+		t.Errorf("expected current route \"/foo\", got %q", CurrentRoute())
+	}
+}
+
 func TestRoutePlaceholderMatching(t *testing.T) {
 	testCases := []struct {
 		route, placeholder string
