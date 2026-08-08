@@ -119,6 +119,17 @@ func (c *Controller) Destroy() {
 	}
 }
 
+// DecorateView hands the view to the modal that is on screen, so a modal can
+// place the cursor or ask for the alt-screen while it is up.
+func (c *Controller) DecorateView(view *tea.View) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.modal != nil {
+		reactea.DecorateView(c.modal, view)
+	}
+}
+
 func (c *Controller) Render(width, height int) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

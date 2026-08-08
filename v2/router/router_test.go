@@ -383,3 +383,36 @@ func TestDestroyReachesRoutedComponent(t *testing.T) {
 		t.Fatal("routed component was not destroyed on teardown")
 	}
 }
+
+type decoratingPage struct {
+	reactea.BasicComponent
+}
+
+func (c *decoratingPage) Render(int, int) string { return "PAGE" }
+
+func (c *decoratingPage) DecorateView(view *tea.View) {
+	view.WindowTitle = "page"
+	view.Cursor = tea.NewCursor(2, 3)
+}
+
+// The router has to pass the view down to the routed component, otherwise a
+// page could never place the cursor or set a window title.
+func TestDecorateViewReachesRoutedComponent(t *testing.T) {
+	router := NewWithRoutes(map[string]RouteInitializer{
+		"default": func(Params) reactea.Component { return &decoratingPage{} },
+	})
+
+	router.Init()
+
+	view := tea.NewView("")
+
+	router.DecorateView(&view)
+
+	if view.WindowTitle != "page" {
+		t.Errorf("WindowTitle = %q", view.WindowTitle)
+	}
+
+	if view.Cursor == nil || view.Cursor.X != 2 || view.Cursor.Y != 3 {
+		t.Errorf("Cursor = %+v", view.Cursor)
+	}
+}

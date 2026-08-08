@@ -61,6 +61,14 @@ func (c *Component) Destroy() {
 	}
 }
 
+// DecorateView hands the view to the routed component. The router draws it at
+// full size in the top left, so no cursor translation is needed.
+func (c *Component) DecorateView(view *tea.View) {
+	if c.currentComponent != nil {
+		reactea.DecorateView(c.currentComponent, view)
+	}
+}
+
 func (c *Component) Render(width, height int) string {
 	if c.currentComponent != nil {
 		return c.currentComponent.Render(width, height)
