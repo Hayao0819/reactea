@@ -323,3 +323,57 @@ func TestFailedRerouteFallsBack(t *testing.T) {
 		t.Fatalf("expected fallback render after a failed re-route, got %q", out.String())
 	}
 }
+
+type destroyTrackingComponent struct {
+	reactea.BasicComponent
+
+	destroyed *bool
+}
+
+func (c *destroyTrackingComponent) Render(int, int) string { return "PAGE" }
+func (c *destroyTrackingComponent) Destroy()               { *c.destroyed = true }
+
+// A root component the way an app would write one: it owns a router and hands
+// every lifecycle method down to it.
+type destroyForwardingComponent struct {
+	router *Component
+}
+
+func (c *destroyForwardingComponent) Init() tea.Cmd { return c.router.Init() }
+func (c *destroyForwardingComponent) Destroy()      { c.router.Destroy() }
+
+func (c *destroyForwardingComponent) Update(msg tea.Msg) tea.Cmd {
+	return tea.Batch(c.router.Update(msg), reactea.Destroy)
+}
+
+func (c *destroyForwardingComponent) Render(width, height int) string {
+	return c.router.Render(width, height)
+}
+
+// Tearing the app down has to reach the routed component too, not stop at the
+// router.
+func TestDestroyReachesRoutedComponent(t *testing.T) {
+	var in, out bytes.Buffer
+
+	in.WriteString("123")
+
+	destroyed := false
+
+	router := NewWithRoutes(map[string]RouteInitializer{
+		"default": func(Params) reactea.Component {
+			return &destroyTrackingComponent{destroyed: &destroyed}
+		},
+	})
+
+	root := &destroyForwardingComponent{router: router}
+
+	program := reactea.NewProgram(root, tea.WithInput(&in), tea.WithOutput(&out))
+
+	if _, err := program.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !destroyed {
+		t.Fatal("routed component was not destroyed on teardown")
+	}
+}
