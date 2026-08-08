@@ -37,8 +37,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	wasRouteChanged = false
-
 	switch msg := msg.(type) {
 	// We want component to know at what size should it render
 	// and unify size handling across all Reactea components
@@ -48,15 +46,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	}
 
-	isUpdate = true
+	beginUpdate()
 
 	m.execute(m.root.Update(msg))
 
-	isUpdate = false
+	previousRoute, routeChanged := endUpdate()
 
 	// Guarantee rerender if route was changed
-	if wasRouteChanged {
-		return m, updatedRoute(lastRoute)
+	if routeChanged {
+		return m, updatedRoute(previousRoute)
 	}
 
 	return m, nil
