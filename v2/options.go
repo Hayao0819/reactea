@@ -19,6 +19,9 @@ func WithoutInput() func(*tea.Program) {
 
 func WithRoute(route string) func(*tea.Program) {
 	return func(*tea.Program) {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+
 		if len(route) != 0 && route[0] == '/' {
 			currentRoute = route
 		}

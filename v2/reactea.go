@@ -7,10 +7,7 @@ import tea "charm.land/bubbletea/v2"
 func NewProgram(root Component, options ...tea.ProgramOption) *tea.Program {
 	// Ensure globals are default, useful for tests and
 	// running programs SEQUENTIALLY during runtime
-	isUpdate = false
-	currentRoute = "/"
-	lastRoute = "/"
-	wasRouteChanged = false
+	resetRouteState()
 
 	m := &model{
 		program: nil,

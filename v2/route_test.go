@@ -1,9 +1,11 @@
 package reactea
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -238,5 +240,64 @@ func TestRoutePlaceholderMatching(t *testing.T) {
 		if !reflect.DeepEqual(got, testCase.expected) {
 			t.Errorf("Bad result. Route: \"%s\", Placeholder: \"%s\". Expected %v, got %v", testCase.route, testCase.placeholder, testCase.expected, got)
 		}
+	}
+}
+
+type routeReadingComponent struct {
+	BasicComponent
+
+	n int
+}
+
+func (c *routeReadingComponent) Render(int, int) string { return "" }
+
+func (c *routeReadingComponent) Update(msg tea.Msg) tea.Cmd {
+	if _, ok := msg.(tea.WindowSizeMsg); !ok {
+		return nil
+	}
+
+	c.n++
+	if c.n > 50 {
+		return Destroy
+	}
+
+	if c.n%2 == 0 {
+		SetRoute("/a")
+	} else {
+		SetRoute("/")
+	}
+
+	if c.n > 1 {
+		return nil
+	}
+
+	// Reactea runs every command on its own goroutine, so a command that reads
+	// the route while it works must not race the event loop writing it.
+	return func() tea.Msg {
+		deadline := time.Now().Add(100 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			_ = CurrentRoute()
+		}
+
+		return nil
+	}
+}
+
+func TestRouteReadableFromCommandGoroutine(t *testing.T) {
+	var in, out bytes.Buffer
+
+	in.WriteString("123")
+
+	program := NewProgram(&routeReadingComponent{}, tea.WithInput(&in), tea.WithOutput(&out))
+
+	go func() {
+		for i := 0; i < 60; i++ {
+			time.Sleep(time.Millisecond)
+			program.Send(tea.WindowSizeMsg{Width: 10, Height: 10})
+		}
+	}()
+
+	if _, err := program.Run(); err != nil {
+		t.Fatal(err)
 	}
 }

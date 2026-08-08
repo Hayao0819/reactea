@@ -2,6 +2,7 @@ package reactea
 
 import (
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -12,25 +13,42 @@ type RouteUpdatedMsg struct {
 
 // Global Route object, substitute of window.location
 // Feel free to use standard path package
+//
+// stateMu guards these and isUpdate. Reactea runs every tea.Cmd on its own
+// goroutine, so a command reading the route races the event loop writing it
+// unless both go through here.
 var (
+	stateMu         sync.RWMutex
 	currentRoute    = "/"
 	lastRoute       = "/"
 	wasRouteChanged = false
 )
 
 func CurrentRoute() string {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+
 	return currentRoute
 }
 
 func LastRoute() string {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+
 	return lastRoute
 }
 
 func WasRouteChanged() bool {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+
 	return wasRouteChanged
 }
 
 func SetRoute(target string) tea.Cmd {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
 	if !isUpdate {
 		panic("tried updating global route not in update")
 	}
@@ -54,6 +72,35 @@ func SetRoute(target string) tea.Cmd {
 	return nil
 }
 
+func beginUpdate() {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	wasRouteChanged = false
+	isUpdate = true
+}
+
+// endUpdate closes the update stage and reports the route as it was before the
+// stage, plus whether it ended up changed.
+func endUpdate() (string, bool) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	isUpdate = false
+
+	return lastRoute, wasRouteChanged
+}
+
+func resetRouteState() {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	isUpdate = false
+	currentRoute = "/"
+	lastRoute = "/"
+	wasRouteChanged = false
+}
+
 func Navigate(target string) tea.Cmd {
 	var currentRouteLevels []string
 
@@ -69,7 +116,7 @@ func Navigate(target string) tea.Cmd {
 		// Strip the leading empty element (from the leading '/') and any
 		// trailing empty element. Guard the slice so a malformed currentRoute
 		// (e.g. one without a leading '/') can't trigger an out-of-range panic.
-		levels := strings.Split(currentRoute, "/")
+		levels := strings.Split(CurrentRoute(), "/")
 		if len(levels) >= 2 {
 			currentRouteLevels = levels[1 : len(levels)-1]
 		} else {
