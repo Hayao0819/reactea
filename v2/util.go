@@ -103,6 +103,8 @@ type Reactified[TModel tea.Model] struct {
 	BasicComponent
 
 	Model TModel
+
+	view tea.View
 }
 
 // Reactify wraps a tea.Model as a reactea.Component.
@@ -130,8 +132,21 @@ func (c *Reactified[TModel]) Update(msg tea.Msg) tea.Cmd {
 
 func (c *Reactified[TModel]) Render(width, height int) string {
 	// In v2 a model's View() returns a tea.View; components render to a string,
-	// so hand back the view's content.
-	return c.Model.View().Content
+	// so hand back the view's content and keep the rest for DecorateView.
+	c.view = c.Model.View()
+
+	return c.view.Content
+}
+
+// DecorateView forwards the wrapped model's cursor, which is how a v2 text
+// input reports where it wants the terminal cursor. The position is relative to
+// the widget's own render, so a parent that draws it at an offset has to call
+// TranslateCursor. The view's other fields stay behind: a widget nested in a
+// tree has no business flipping the alt-screen or the window title.
+func (c *Reactified[TModel]) DecorateView(view *tea.View) {
+	if c.view.Cursor != nil {
+		view.Cursor = c.view.Cursor
+	}
 }
 
 // Used for tests
