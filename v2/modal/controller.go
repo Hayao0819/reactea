@@ -106,6 +106,19 @@ func (c *Controller) Update(msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// Destroy tears down the modal that is on screen. The flow goroutine destroys
+// each modal as it advances, but a teardown while a modal is still shown never
+// reaches that path.
+func (c *Controller) Destroy() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.modal != nil {
+		c.modal.Destroy()
+		c.modal = nil
+	}
+}
+
 func (c *Controller) Render(width, height int) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
