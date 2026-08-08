@@ -34,6 +34,35 @@ type Component interface {
 	Render(int, int) string
 }
 
+// ViewDecorator is an optional Component interface. Render() still produces the
+// content; a component that also needs one of the terminal features Bubbletea
+// v2 moved into tea.View (cursor, alt-screen, window title, mouse mode, colors)
+// implements this and sets the fields it cares about.
+//
+// Only the root is asked directly, so a composite component has to pass the
+// view down to whichever children it renders — see DecorateView.
+type ViewDecorator interface {
+	DecorateView(*tea.View)
+}
+
+// DecorateView lets component decorate view when it implements ViewDecorator.
+// Composite components call it on each child they render.
+func DecorateView(component Component, view *tea.View) {
+	if decorator, ok := component.(ViewDecorator); ok {
+		decorator.DecorateView(view)
+	}
+}
+
+// TranslateCursor moves a cursor set by a child into the parent's coordinate
+// space. Reactea has no layout engine, so a parent that draws a child at an
+// offset is the only one that knows the offset and has to apply it.
+func TranslateCursor(view *tea.View, dx, dy int) {
+	if view.Cursor != nil {
+		view.Cursor.X += dx
+		view.Cursor.Y += dy
+	}
+}
+
 // AnyRenderer is the set of stateless renderer function types.
 type AnyRenderer[TProps any] interface {
 	Renderer[TProps] | AnyProplessRenderer

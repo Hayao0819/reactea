@@ -61,10 +61,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() tea.View {
-	// Components still render to a string; wrap it in the v2 tea.View the
-	// program expects. Richer View features (cursor, alt-screen, layers) are
-	// intentionally not surfaced through the component tree for now.
-	return tea.NewView(m.root.Render(m.width, m.height))
+	view := tea.NewView(m.root.Render(m.width, m.height))
+
+	DecorateView(m.root, &view)
+
+	return view
 }
 
 func (m model) execute(cmd tea.Cmd) {
