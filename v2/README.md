@@ -216,6 +216,30 @@ Reactea takes pointer approach for components making state modifiable in any lif
 
 `Update()` **IS NOT** guaranteed to be called on first-run, `Init()` for most part is, and critical logic should be there
 
+## Decorating the view
+
+Bubbletea v2 moved the alt-screen, the cursor, the window title, mouse mode and
+the terminal colors out of commands and options into the `tea.View` the root
+model returns. Components still render to a string, so a component that needs
+one of those implements `ViewDecorator`
+
+```go
+func (c *Component) DecorateView(view *tea.View) {
+    view.AltScreen = true
+    view.Cursor = tea.NewCursor(c.cursorX, c.cursorY)
+}
+```
+
+Only the root component is asked directly. A composite passes the view on to the
+children it renders with `reactea.DecorateView(child, view)`; `router.Component`
+and `modal.Controller` already do. Cursor positions are relative to the child's
+own render, so a parent that draws a child at an offset applies
+`reactea.TranslateCursor(view, dx, dy)` after collecting it.
+
+`Reactify` forwards the wrapped Bubbletea model's cursor, which is how a v2
+`textinput` gets a real terminal cursor. Nothing else from the wrapped model's
+view is forwarded.
+
 ## Stateless components
 
 Stateless components are represented by following function types
