@@ -51,6 +51,16 @@ func (c *Component) Update(msg tea.Msg) tea.Cmd {
 	return tea.Batch(initCmd, updateCmd)
 }
 
+// Destroy tears down the routed component. Without it the router would inherit
+// BasicComponent's no-op and the current page would never be destroyed when the
+// app itself is torn down.
+func (c *Component) Destroy() {
+	if c.currentComponent != nil {
+		c.currentComponent.Destroy()
+		c.currentComponent = nil
+	}
+}
+
 func (c *Component) Render(width, height int) string {
 	if c.currentComponent != nil {
 		return c.currentComponent.Render(width, height)
