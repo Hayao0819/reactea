@@ -236,9 +236,17 @@ and `modal.Controller` already do. Cursor positions are relative to the child's
 own render, so a parent that draws a child at an offset applies
 `reactea.TranslateCursor(view, dx, dy)` after collecting it.
 
-`Reactify` forwards the wrapped Bubbletea model's cursor, which is how a v2
-`textinput` gets a real terminal cursor. Nothing else from the wrapped model's
-view is forwarded.
+`Reactify` forwards the wrapped model's cursor, and nothing else from its view.
+That only covers types satisfying `tea.Model`. The bubbles v2 widgets are not
+among them: they still return `View() string` and hand out the cursor separately
+through `Cursor() *tea.Cursor`. A component holding a `textinput` turns off the
+virtual cursor and reports the real one itself
+
+```go
+func (c *Component) DecorateView(view *tea.View) {
+    view.Cursor = c.textinput.Cursor()
+}
+```
 
 ## Stateless components
 
