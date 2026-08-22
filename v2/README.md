@@ -265,6 +265,23 @@ means **it translates their cursors for you** — the offset arithmetic that
 field by field rather than last-one-wins: an empty title or a nil cursor from one
 child no longer wipes out what a sibling asked for.
 
+### Borders and padding
+
+Lipgloss styling needs nothing from reactea — `Render` returns a string, so style
+it. The one thing worth a helper is the frame. Lipgloss counts `Width`/`Height`
+as the **outer** size, so a bordered child has to be rendered at the box minus the
+frame, and its cursor shifted by the border and padding on the top left.
+`Framed` does both.
+
+```go
+layout.Framed(
+    lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2),
+    page,
+)
+```
+
+A `Frame` is a `Component`, so it nests inside a `Box` and the offsets stack.
+
 ## Wrapping Bubbletea models and bubbles widgets
 
 The two need different adapters, because a bubbles widget is not a `tea.Model`
