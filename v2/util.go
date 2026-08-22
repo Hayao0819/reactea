@@ -97,8 +97,11 @@ func ComponentifyDumb[TRenderer AnyProplessRenderer](renderer TRenderer) Compone
 	return &dumbComponentTransformer[TRenderer]{renderer: renderer}
 }
 
-// Reactifies Bubbletea's models into reactea's components, so existing
-// Bubbletea/bubbles widgets drop straight into the component tree.
+// Reactifies a whole Bubbletea model into a reactea component. This is for
+// types that satisfy tea.Model — a self-contained program you want to nest, not
+// a bubbles widget. Widgets return their own concrete type from Update and a
+// plain string from View, so they never satisfy tea.Model; use ReactifyWidget
+// for those.
 type Reactified[TModel tea.Model] struct {
 	BasicComponent
 
@@ -119,10 +122,9 @@ func (c *Reactified[TModel]) Init() tea.Cmd {
 func (c *Reactified[TModel]) Update(msg tea.Msg) tea.Cmd {
 	updated, cmd := c.Model.Update(msg)
 
-	// bubbles widgets are value-receiver models: Update returns a NEW model
-	// value, so we must store it back or all widget state (cursor, text, scroll
-	// offset) is lost. The assertion guards against a model whose Update returns
-	// a different concrete type.
+	// Models are usually value receivers: Update returns a NEW value, so we must
+	// store it back or all of its state is lost. The assertion guards against a
+	// model whose Update returns a different concrete type.
 	if model, ok := updated.(TModel); ok {
 		c.Model = model
 	}
@@ -146,6 +148,70 @@ func (c *Reactified[TModel]) Render(width, height int) string {
 func (c *Reactified[TModel]) DecorateView(view *tea.View) {
 	if c.view.Cursor != nil {
 		view.Cursor = c.view.Cursor
+	}
+}
+
+// Widget is the shape every bubbles widget has: Update returns the widget's own
+// concrete type (which is why a widget never satisfies tea.Model) and View
+// returns a plain string. The self-referential type parameter is what lets one
+// adapter cover textinput, textarea, viewport, list, table and friends.
+type Widget[T any] interface {
+	Update(tea.Msg) (T, tea.Cmd)
+	View() string
+}
+
+// Reactifies a bubbles widget into a reactea component.
+type ReactifiedWidget[TWidget Widget[TWidget]] struct {
+	BasicComponent
+
+	Widget TWidget
+}
+
+// ReactifyWidget wraps a bubbles widget as a reactea.Component.
+func ReactifyWidget[TWidget Widget[TWidget]](widget TWidget) *ReactifiedWidget[TWidget] {
+	return &ReactifiedWidget[TWidget]{Widget: widget}
+}
+
+// Init runs the widget's own Init when it has one. Only some widgets (timer,
+// stopwatch, filepicker, progress) do, so it is not part of Widget.
+func (c *ReactifiedWidget[TWidget]) Init() tea.Cmd {
+	if initializer, ok := any(c.Widget).(interface{ Init() tea.Cmd }); ok {
+		return initializer.Init()
+	}
+
+	return nil
+}
+
+func (c *ReactifiedWidget[TWidget]) Update(msg tea.Msg) tea.Cmd {
+	updated, cmd := c.Widget.Update(msg)
+
+	// Widgets are value receivers: Update returns a NEW value, so it has to be
+	// stored back or all state (text, cursor position, scroll offset) is lost.
+	c.Widget = updated
+
+	return cmd
+}
+
+func (c *ReactifiedWidget[TWidget]) Render(width, height int) string {
+	return c.Widget.View()
+}
+
+// DecorateView reports the widget's real terminal cursor. Widgets that can do
+// this expose Cursor() separately from View() and only return a cursor once the
+// caller has turned the virtual cursor off (textinput.SetVirtualCursor(false))
+// and focused the widget — reactea does not force either, since the virtual
+// cursor drawn into the string is still the default and works fine.
+//
+// The position is relative to the widget's own render, so a parent that draws it
+// at an offset has to call TranslateCursor.
+func (c *ReactifiedWidget[TWidget]) DecorateView(view *tea.View) {
+	reporter, ok := any(c.Widget).(interface{ Cursor() *tea.Cursor })
+	if !ok {
+		return
+	}
+
+	if cursor := reporter.Cursor(); cursor != nil {
+		view.Cursor = cursor
 	}
 }
 

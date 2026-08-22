@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"testing"
 
+	"charm.land/bubbles/v2/stopwatch"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -141,4 +145,58 @@ func TestComponentify(t *testing.T) {
 			t.Errorf("transformed value doesn't render correctly, expected \"working\", got \"%s\"", result)
 		}
 	})
+}
+
+func TestReactifyWidget(t *testing.T) {
+	input := textinput.New()
+	input.SetVirtualCursor(false)
+	input.Focus()
+
+	component := ReactifyWidget(input)
+
+	var _ Component = component
+	var _ Component = ReactifyWidget(viewport.New())
+	var _ Component = ReactifyWidget(textarea.New())
+
+	component.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+
+	if got := component.Widget.Value(); got != "a" {
+		t.Fatalf("widget state was not stored back: %q", got)
+	}
+
+	view := tea.NewView(component.Render(20, 1))
+
+	component.DecorateView(&view)
+
+	if view.Cursor == nil {
+		t.Fatal("a focused textinput with the virtual cursor off reported no cursor")
+	}
+}
+
+// A widget that draws its own virtual cursor reports none, and the view is left
+// untouched.
+func TestReactifyWidgetVirtualCursor(t *testing.T) {
+	input := textinput.New()
+	input.Focus()
+
+	component := ReactifyWidget(input)
+
+	view := tea.NewView(component.Render(20, 1))
+
+	component.DecorateView(&view)
+
+	if view.Cursor != nil {
+		t.Errorf("cursor = %+v, want nil while the virtual cursor is on", view.Cursor)
+	}
+}
+
+// Widgets without Init() must not break the adapter.
+func TestReactifyWidgetInitIsOptional(t *testing.T) {
+	if cmd := ReactifyWidget(textinput.New()).Init(); cmd != nil {
+		t.Error("textinput has no Init, expected a nil cmd")
+	}
+
+	if cmd := ReactifyWidget(stopwatch.New()).Init(); cmd == nil {
+		t.Error("stopwatch has an Init, expected its cmd")
+	}
 }
