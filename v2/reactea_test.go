@@ -23,13 +23,13 @@ type probe struct {
 	onRender func(*reactea.Ctx)
 }
 
-func (c *probe) Init(*reactea.Ctx) tea.Cmd {
+func (c *probe) Init(ctx *reactea.Ctx) tea.Cmd {
 	c.inited = true
+
+	ctx.OnDestroy(func() { c.destroyed = true })
 
 	return nil
 }
-
-func (c *probe) Destroy() { c.destroyed = true }
 
 func (c *probe) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	c.messages = append(c.messages, msg)
@@ -80,8 +80,8 @@ func TestComponentDrivenWithoutAProgram(t *testing.T) {
 }
 
 // The whole point of the teardown filter: quitting the ordinary Bubbletea way
-// still destroys the tree.
-func TestTeaQuitRunsDestroy(t *testing.T) {
+// still runs the cleanups.
+func TestTeaQuitRunsCleanups(t *testing.T) {
 	root := &probe{label: ""}
 
 	root.onUpdate = func(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
@@ -101,7 +101,52 @@ func TestTeaQuitRunsDestroy(t *testing.T) {
 	}
 
 	if !root.destroyed {
-		t.Fatal("tea.Quit skipped Destroy")
+		t.Fatal("tea.Quit skipped the cleanups")
+	}
+}
+
+func TestCleanupsRunNewestFirst(t *testing.T) {
+	var order []string
+
+	app := reactea.New(reactea.Func(func(*reactea.Ctx) string { return "" }))
+
+	app.Scope().OnDestroy(func() { order = append(order, "first") })
+	app.Scope().OnDestroy(func() { order = append(order, "second") })
+
+	app.Scope().Close()
+
+	if len(order) != 2 || order[0] != "second" || order[1] != "first" {
+		t.Errorf("order = %v, want [second first]", order)
+	}
+}
+
+// Registering on a closed scope must not strand the cleanup.
+func TestCleanupOnAClosedScopeRunsAtOnce(t *testing.T) {
+	scope := reactea.NewScope()
+
+	scope.Close()
+
+	ran := false
+
+	scope.OnDestroy(func() { ran = true })
+
+	if !ran {
+		t.Error("the late cleanup never ran")
+	}
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	runs := 0
+
+	scope := reactea.NewScope()
+
+	scope.OnDestroy(func() { runs++ })
+
+	scope.Close()
+	scope.Close()
+
+	if runs != 1 {
+		t.Errorf("cleanup ran %d times", runs)
 	}
 }
 
@@ -139,27 +184,35 @@ func TestCtxInsetClampsToTheParent(t *testing.T) {
 	}
 }
 
-func TestDecorationsReachTheView(t *testing.T) {
-	root := &probe{label: "x"}
+// Terminal state is asked for with a command and then persists, so Render stays
+// a function of the component's state.
+func TestTerminalCommandsPersistAcrossFrames(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 3))
 
-	root.onRender = func(ctx *reactea.Ctx) {
-		ctx.AltScreen(true)
-		ctx.Title("reactea")
+	app.Update(reactea.EnterAltScreen())
+	app.Update(reactea.SetWindowTitle("reactea")())
+
+	for frame := range 3 {
+		view := app.View()
+
+		if !view.AltScreen {
+			t.Errorf("frame %d: AltScreen was lost", frame)
+		}
+
+		if view.WindowTitle != "reactea" {
+			t.Errorf("frame %d: WindowTitle = %q", frame, view.WindowTitle)
+		}
 	}
 
-	view := reactea.New(root, reactea.WithSize(10, 3)).View()
+	app.Update(reactea.ExitAltScreen())
 
-	if !view.AltScreen {
-		t.Error("AltScreen was not carried through")
-	}
-
-	if view.WindowTitle != "reactea" {
-		t.Errorf("WindowTitle = %q", view.WindowTitle)
+	if app.View().AltScreen {
+		t.Error("ExitAltScreen did not take")
 	}
 }
 
-// Decorations are per frame, so a component that stops asking gets its way.
-func TestDecorationsResetEachFrame(t *testing.T) {
+// The cursor is per frame, so a component that stops asking gets its way.
+func TestCursorResetsEachFrame(t *testing.T) {
 	root := &probe{label: "x"}
 
 	decorate := true

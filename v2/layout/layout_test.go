@@ -24,13 +24,13 @@ type probe struct {
 	wantsCursor      bool
 }
 
-func (c *probe) Init(*reactea.Ctx) tea.Cmd {
+func (c *probe) Init(ctx *reactea.Ctx) tea.Cmd {
 	c.inited = true
+
+	ctx.OnDestroy(func() { c.destroyed = true })
 
 	return nil
 }
-
-func (c *probe) Destroy() { c.destroyed = true }
 
 func (c *probe) Update(*reactea.Ctx, tea.Msg) tea.Cmd {
 	c.updates++
@@ -163,7 +163,7 @@ func TestCursorIsTranslatedByOffset(t *testing.T) {
 
 	app := render(Column(Fixed(2, &probe{label: "h"}), Grow(1, body)), 20, 10)
 
-	cursor := app.Ctx().View().Cursor
+	cursor := app.View().Cursor
 
 	if cursor == nil {
 		t.Fatal("the child cursor did not reach the app")
@@ -179,7 +179,7 @@ func TestRowTranslatesCursorHorizontally(t *testing.T) {
 
 	app := render(Row(Fixed(10, &probe{label: "s"}), Grow(1, main)), 40, 5)
 
-	cursor := app.Ctx().View().Cursor
+	cursor := app.View().Cursor
 
 	if cursor.X != 11 || cursor.Y != 1 {
 		t.Errorf("cursor = (%d, %d), want (11, 1)", cursor.X, cursor.Y)
@@ -216,7 +216,7 @@ func TestLifecycleReachesEveryItem(t *testing.T) {
 
 	app.Init()
 	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	box.Destroy()
+	app.Scope().Close()
 
 	for _, c := range []*probe{first, second} {
 		if !c.inited || c.updates != 1 || !c.destroyed {

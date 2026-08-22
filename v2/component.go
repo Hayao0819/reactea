@@ -2,42 +2,36 @@ package reactea
 
 import tea "charm.land/bubbletea/v2"
 
-// The lifecycle is
+// Component is a piece of UI. Three methods, one argument in common.
 //
-//	\/ Usually won't be called on first render
+//	Init ---> Update -> Render
+//	      |            /\ Update is not guaranteed to run before the first
+//	      |---------->    Render, so put anything critical in Init
 //
-// Init ---> Update -> Render ---> Destroy?
+// Components are pointers and mutate in place; Update returns work to do, not a
+// new component.
 //
-//	|                     |   /\ implementation detail and
-//	|---------------------|   therefore doesn't return tea.Cmd
-//
-// Reactea takes pointer approach for components
-// making state mutable in any lifecycle method
-//
-// Note: Lifecycle is fully controlled by parent component
-// making graph above fully theoretical and possibly
-// invalid for third-party components
+// There is no Destroy. A component that owns a resource registers a cleanup with
+// Ctx.OnDestroy instead, which means no parent can leak a child by forgetting to
+// forward a teardown call. See Scope.
 type Component interface {
-	// Init initializes subcomponents and kicks off long IO through tea.Cmd.
+	// Init initialises subcomponents and kicks off long IO through tea.Cmd.
 	Init(*Ctx) tea.Cmd
 
 	// Update handles a message and may return work to do.
 	Update(*Ctx, tea.Msg) tea.Cmd
 
-	// Render draws into the box the Ctx describes, and asks for whatever
-	// terminal features it needs through that same Ctx.
+	// Render draws into the box the Ctx describes. It should be a function of
+	// the component's state: ask for terminal features with commands
+	// (EnterAltScreen, SetWindowTitle) rather than while drawing. The cursor is
+	// the exception — it depends on the layout, so it is set through the Ctx.
 	Render(*Ctx) string
-
-	// Destroy is called when the component is about to end its lifecycle. A
-	// parent is responsible for destroying its children.
-	Destroy()
 }
 
 // BasicComponent implements every lifecycle method except Render.
 type BasicComponent struct{}
 
 func (c *BasicComponent) Init(*Ctx) tea.Cmd            { return nil }
-func (c *BasicComponent) Destroy()                     {}
 func (c *BasicComponent) Update(*Ctx, tea.Msg) tea.Cmd { return nil }
 
 // InvisibleComponent renders nothing.

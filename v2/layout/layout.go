@@ -78,12 +78,6 @@ func (b *Box) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (b *Box) Destroy() {
-	for _, item := range b.items {
-		item.Component.Destroy()
-	}
-}
-
 func (b *Box) Render(ctx *reactea.Ctx) string {
 	rendered := make([]string, 0, len(b.items))
 

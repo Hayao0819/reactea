@@ -18,7 +18,12 @@ type prompt struct {
 }
 
 func (c *prompt) Render(*reactea.Ctx) string { return "prompt:" + c.name }
-func (c *prompt) Destroy()                   { c.destroyed = true }
+
+func (c *prompt) Init(ctx *reactea.Ctx) tea.Cmd {
+	ctx.OnDestroy(func() { c.destroyed = true })
+
+	return nil
+}
 
 func (c *prompt) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "enter" {
@@ -150,7 +155,7 @@ func TestReturnPopsAndDeliversTheResult(t *testing.T) {
 	}
 
 	if !shown.destroyed {
-		t.Error("the popped modal was not destroyed")
+		t.Error("the popped modal's cleanup never ran")
 	}
 
 	if got := app.View().Content; got != "base" {
@@ -192,7 +197,9 @@ func TestFailDeliversAnError(t *testing.T) {
 	}
 }
 
-func TestDestroyTearsDownEverything(t *testing.T) {
+// Closing the root scope reaches every stacked modal, without the stack being
+// asked to forward anything.
+func TestRootTeardownReachesEveryModal(t *testing.T) {
 	stack := modal.New(&base{})
 
 	app := reactea.New(stack, reactea.WithSize(20, 5))
@@ -204,13 +211,37 @@ func TestDestroyTearsDownEverything(t *testing.T) {
 	drive(t, app, stack.Push(first)())
 	drive(t, app, stack.Push(second)())
 
-	stack.Destroy()
+	app.Scope().Close()
 
 	if !first.destroyed || !second.destroyed {
-		t.Errorf("stacked modals were not destroyed: %v %v", first.destroyed, second.destroyed)
+		t.Errorf("stacked modals were not cleaned up: %v %v", first.destroyed, second.destroyed)
+	}
+}
+
+// Dismissing one modal must not tear down the one underneath it.
+func TestDismissOnlyTearsDownTheTop(t *testing.T) {
+	stack := modal.New(&base{})
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+
+	app.Init()
+
+	first, second := &prompt{name: "a"}, &prompt{name: "b"}
+
+	drive(t, app, stack.Push(first)())
+	drive(t, app, stack.Push(second)())
+
+	app.Update(modal.Dismiss())
+
+	if !second.destroyed {
+		t.Error("the dismissed modal's cleanup never ran")
 	}
 
-	if stack.Top() != nil {
-		t.Error("the stack was not emptied")
+	if first.destroyed {
+		t.Error("dismissing the top modal tore down the one below it")
+	}
+
+	if stack.Top() != first {
+		t.Error("the modal below did not come back to the top")
 	}
 }

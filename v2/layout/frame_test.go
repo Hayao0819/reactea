@@ -40,9 +40,7 @@ func TestFramedTranslatesCursor(t *testing.T) {
 
 	app := reactea.New(Framed(style, child), reactea.WithSize(30, 10))
 
-	app.View()
-
-	cursor := app.Ctx().View().Cursor
+	cursor := app.View().Cursor
 
 	if cursor == nil {
 		t.Fatal("the child cursor did not reach the app")
@@ -65,9 +63,7 @@ func TestFramedInsideColumn(t *testing.T) {
 		reactea.WithSize(20, 10),
 	)
 
-	app.View()
-
-	cursor := app.Ctx().View().Cursor
+	cursor := app.View().Cursor
 
 	if cursor.X != 1 || cursor.Y != 3 {
 		t.Errorf("cursor = (%d, %d), want (1, 3)", cursor.X, cursor.Y)
@@ -95,7 +91,7 @@ func TestFramedForwardsLifecycle(t *testing.T) {
 
 	app.Init()
 	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	framed.Destroy()
+	app.Scope().Close()
 
 	if !child.inited || child.updates != 1 || !child.destroyed {
 		t.Errorf("inited=%v updates=%d destroyed=%v", child.inited, child.updates, child.destroyed)

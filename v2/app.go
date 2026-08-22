@@ -19,24 +19,29 @@ type routeRequestMsg struct {
 }
 
 // teardownMsg is how a quit is turned into a teardown. Bubbletea's event loop
-// returns on QuitMsg before Update ever sees it, so without this filter hop a
-// plain tea.Quit would skip Destroy for the whole tree.
+// returns on QuitMsg before Update ever sees it, so without this filter hop the
+// root scope would never close.
 type teardownMsg struct{ next tea.Msg }
 
-// App owns everything a running program needs. Route state lives here rather
-// than in package variables, so two apps in one process — or two tests in
-// parallel — never see each other's route.
+// App owns everything a running program needs. Route and terminal state live
+// here rather than in package variables, so two apps in one process — or two
+// tests in parallel — never see each other's.
 //
 // App implements tea.Model; commands are handed straight back to Bubbletea,
 // which already runs them under its own panic guard.
 type App struct {
 	root    Component
 	program *tea.Program
+	scope   *Scope
 
 	route         string
 	previousRoute string
 
-	view     tea.View
+	// terminal holds what the program asked the terminal for; it persists across
+	// frames. cursor is per frame and is cleared before every Render.
+	terminal tea.View
+	cursor   *tea.Cursor
+
 	tornDown bool
 
 	width, height int
@@ -61,7 +66,12 @@ func WithSize(width, height int) Option {
 }
 
 func New(root Component, options ...Option) *App {
-	app := &App{root: root, route: "/", previousRoute: "/"}
+	app := &App{
+		root:          root,
+		scope:         NewScope(),
+		route:         "/",
+		previousRoute: "/",
+	}
 
 	for _, option := range options {
 		option(app)
@@ -71,7 +81,7 @@ func New(root Component, options ...Option) *App {
 }
 
 // Program wraps the app in a Bubbletea program. Quitting through tea.Quit,
-// Ctrl+C or a signal all run the tree's Destroy first.
+// Ctrl+C or a signal all close the root scope first.
 func (a *App) Program(options ...tea.ProgramOption) *tea.Program {
 	options = append(options, tea.WithFilter(a.filter))
 
@@ -90,10 +100,13 @@ func (a *App) Run(options ...tea.ProgramOption) error {
 // Route is the app's current route.
 func (a *App) Route() string { return a.route }
 
-// Ctx is the root context: the whole screen. Tests use it to drive a component
-// without a terminal.
+// Scope is the root scope. It closes when the program ends.
+func (a *App) Scope() *Scope { return a.scope }
+
+// Ctx is the root context: the whole screen, bound to the root scope. Tests use
+// it to drive a component without a terminal.
 func (a *App) Ctx() *Ctx {
-	return &Ctx{app: a, width: a.width, height: a.height}
+	return &Ctx{app: a, scope: a.scope, width: a.width, height: a.height}
 }
 
 func (a *App) setRoute(target string) (RouteChangedMsg, bool) {
@@ -130,12 +143,17 @@ func (a *App) Init() tea.Cmd {
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case teardownMsg:
-		a.root.Destroy()
+		a.scope.Close()
 		a.tornDown = true
 
 		next := msg.next
 
 		return a, func() tea.Msg { return next }
+
+	case terminalMsg:
+		msg.apply(&a.terminal)
+
+		return a, nil
 
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
@@ -168,11 +186,12 @@ func (a *App) applyRoute(request routeRequestMsg) tea.Cmd {
 }
 
 func (a *App) View() tea.View {
-	a.view = tea.View{}
+	a.cursor = nil
 
 	content := a.root.Render(a.Ctx())
 
-	view := a.view
+	view := a.terminal
+	view.Cursor = a.cursor
 	view.SetContent(content)
 
 	return view

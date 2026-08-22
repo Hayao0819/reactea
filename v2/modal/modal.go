@@ -42,10 +42,15 @@ func Fail[T any](err error) tea.Cmd {
 	)
 }
 
+type mounted struct {
+	component reactea.Component
+	scope     *reactea.Scope
+}
+
 // Stack renders base until something is pushed on top of it.
 type Stack struct {
 	base   reactea.Component
-	modals []reactea.Component
+	modals []mounted
 }
 
 func New(base reactea.Component) *Stack {
@@ -66,33 +71,34 @@ func (s *Stack) Top() reactea.Component {
 		return nil
 	}
 
-	return s.modals[len(s.modals)-1]
+	return s.modals[len(s.modals)-1].component
+}
+
+func (s *Stack) top() *mounted {
+	if len(s.modals) == 0 {
+		return nil
+	}
+
+	return &s.modals[len(s.modals)-1]
 }
 
 func (s *Stack) Init(ctx *reactea.Ctx) tea.Cmd {
 	return s.base.Init(ctx)
 }
 
-func (s *Stack) Destroy() {
-	for _, modal := range s.modals {
-		modal.Destroy()
-	}
-
-	s.modals = nil
-
-	s.base.Destroy()
-}
-
 func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case pushMsg:
-		s.modals = append(s.modals, msg.modal)
+		// Each modal gets a scope of its own, so dismissing one runs exactly the
+		// cleanups it registered.
+		scope := ctx.Scope().Child()
+		s.modals = append(s.modals, mounted{component: msg.modal, scope: scope})
 
-		return msg.modal.Init(ctx)
+		return msg.modal.Init(ctx.WithScope(scope))
 
 	case dismissMsg:
-		if top := s.Top(); top != nil {
-			top.Destroy()
+		if top := s.top(); top != nil {
+			top.scope.Close()
 			s.modals = s.modals[:len(s.modals)-1]
 		}
 
@@ -101,16 +107,16 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 
 	// A modal is a blocking overlay: while one is up it takes the input, and the
 	// base sees nothing.
-	if top := s.Top(); top != nil {
-		return top.Update(ctx, msg)
+	if top := s.top(); top != nil {
+		return top.component.Update(ctx.WithScope(top.scope), msg)
 	}
 
 	return s.base.Update(ctx, msg)
 }
 
 func (s *Stack) Render(ctx *reactea.Ctx) string {
-	if top := s.Top(); top != nil {
-		return top.Render(ctx)
+	if top := s.top(); top != nil {
+		return top.component.Render(ctx.WithScope(top.scope))
 	}
 
 	return s.base.Render(ctx)

@@ -24,6 +24,7 @@ type Component struct {
 	NotFound reactea.RenderFunc
 
 	current reactea.Component
+	scope   *reactea.Scope
 	route   string
 }
 
@@ -38,18 +39,23 @@ func (c *Component) Init(ctx *reactea.Ctx) tea.Cmd {
 	return c.initRoute(ctx)
 }
 
-func (c *Component) Destroy() {
-	if c.current != nil {
-		c.current.Destroy()
-		c.current = nil
+// Unmount drops the current page and closes its scope, running whatever
+// cleanups it registered. The router does this on every route change; an
+// enclosing component does not have to.
+func (c *Component) Unmount() {
+	if c.scope != nil {
+		c.scope.Close()
+		c.scope = nil
 	}
+
+	c.current = nil
 }
 
 func (c *Component) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	var initCmd tea.Cmd
 
 	if _, ok := msg.(reactea.RouteChangedMsg); ok {
-		c.Destroy()
+		c.Unmount()
 
 		initCmd = c.initRoute(ctx)
 	}
@@ -58,7 +64,7 @@ func (c *Component) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		return initCmd
 	}
 
-	return tea.Batch(initCmd, c.current.Update(ctx, msg))
+	return tea.Batch(initCmd, c.current.Update(ctx.WithScope(c.scope), msg))
 }
 
 func (c *Component) Render(ctx *reactea.Ctx) string {
@@ -70,7 +76,7 @@ func (c *Component) Render(ctx *reactea.Ctx) string {
 	}
 
 	if c.current != nil {
-		return c.current.Render(ctx)
+		return c.current.Render(ctx.WithScope(c.scope))
 	}
 
 	if c.NotFound != nil {
@@ -83,19 +89,21 @@ func (c *Component) Render(ctx *reactea.Ctx) string {
 func (c *Component) initRoute(ctx *reactea.Ctx) tea.Cmd {
 	c.current, c.route = nil, ctx.Route()
 
-	if initializer, params, ok := c.match(ctx.Route()); ok {
-		c.current = initializer(params)
+	initializer, params, ok := c.match(ctx.Route())
+	if !ok {
+		if initializer, ok = c.Routes["default"]; !ok {
+			return nil
+		}
 
-		return c.current.Init(ctx)
+		params = nil
 	}
 
-	if initializer, ok := c.Routes["default"]; ok {
-		c.current = initializer(nil)
+	// The page gets a scope of its own so the next route change can tear down
+	// exactly what this page registered, and nothing else.
+	c.scope = ctx.Scope().Child()
+	c.current = initializer(params)
 
-		return c.current.Init(ctx)
-	}
-
-	return nil
+	return c.current.Init(ctx.WithScope(c.scope))
 }
 
 func (c *Component) match(route string) (RouteInitializer, Params, bool) {

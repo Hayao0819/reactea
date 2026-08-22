@@ -2,18 +2,18 @@ package reactea
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"image/color"
 )
 
 // Ctx is what a component is told about the frame it is taking part in: the box
-// it may draw into, where the app currently is, and the handle it uses to ask
-// for terminal features Bubbletea v2 moved into tea.View.
+// it may draw into, where the app currently is, and the scope its cleanups
+// belong to.
 //
 // A parent hands a child its own box with Inset. Because a Ctx knows its origin
-// on screen, anything positional a child reports — a cursor, most of all — is
-// translated for it, so no parent does offset arithmetic.
+// on screen, a cursor set through it is translated for the component, however
+// deep it sits, so no parent does offset arithmetic.
 type Ctx struct {
-	app *App
+	app   *App
+	scope *Scope
 
 	x, y          int
 	width, height int
@@ -35,14 +35,30 @@ func (c *Ctx) Origin() (int, int) { return c.x, c.y }
 func (c *Ctx) Inset(dx, dy, width, height int) *Ctx {
 	dx, dy = max(0, dx), max(0, dy)
 
-	return &Ctx{
-		app:    c.app,
-		x:      c.x + dx,
-		y:      c.y + dy,
-		width:  clamp(width, 0, max(0, c.width-dx)),
-		height: clamp(height, 0, max(0, c.height-dy)),
-	}
+	child := *c
+	child.x, child.y = c.x+dx, c.y+dy
+	child.width = clamp(width, 0, max(0, c.width-dx))
+	child.height = clamp(height, 0, max(0, c.height-dy))
+
+	return &child
 }
+
+// WithScope returns the same box bound to another scope. A parent that mounts a
+// child it may later unmount gives it one, and closes it when the child goes.
+func (c *Ctx) WithScope(scope *Scope) *Ctx {
+	child := *c
+	child.scope = scope
+
+	return &child
+}
+
+// Scope is the scope cleanups registered through this Ctx belong to.
+func (c *Ctx) Scope() *Scope { return c.scope }
+
+// OnDestroy registers a cleanup with this Ctx's scope: closing a file, stopping
+// a ticker, cancelling a context. It runs when the enclosing scope closes, which
+// for most components means when the program ends.
+func (c *Ctx) OnDestroy(cleanup func()) { c.scope.OnDestroy(cleanup) }
 
 // Route is the app's current route.
 func (c *Ctx) Route() string { return c.app.route }
@@ -66,11 +82,16 @@ func (c *Ctx) Navigate(target string) tea.Cmd {
 	return func() tea.Msg { return routeRequestMsg{target: target, relative: true} }
 }
 
-// SetCursor puts the terminal cursor at a position inside this box. Pass nil to
-// take the cursor back.
+// SetCursor puts the terminal cursor at a position inside this box, in this
+// frame. The cursor is the one thing that cannot be decided outside Render: it
+// depends on the layout, which only exists while rendering — which is exactly
+// why Bubbletea v2 carries it on the view too. Everything else the terminal can
+// be asked for is a command; see EnterAltScreen and friends.
+//
+// Pass nil to leave the cursor hidden.
 func (c *Ctx) SetCursor(cursor *tea.Cursor) {
 	if cursor == nil {
-		c.app.view.Cursor = nil
+		c.app.cursor = nil
 
 		return
 	}
@@ -79,25 +100,10 @@ func (c *Ctx) SetCursor(cursor *tea.Cursor) {
 	moved.X += c.x
 	moved.Y += c.y
 
-	c.app.view.Cursor = &moved
+	c.app.cursor = &moved
 }
 
 // CursorAt is SetCursor for the common case of a plain block cursor.
 func (c *Ctx) CursorAt(x, y int) { c.SetCursor(tea.NewCursor(x, y)) }
-
-func (c *Ctx) AltScreen(on bool) { c.app.view.AltScreen = on }
-
-func (c *Ctx) Title(title string) { c.app.view.WindowTitle = title }
-
-func (c *Ctx) MouseMode(mode tea.MouseMode) { c.app.view.MouseMode = mode }
-
-func (c *Ctx) ReportFocus(on bool) { c.app.view.ReportFocus = on }
-
-func (c *Ctx) BackgroundColor(colour color.Color) { c.app.view.BackgroundColor = colour }
-
-func (c *Ctx) ForegroundColor(colour color.Color) { c.app.view.ForegroundColor = colour }
-
-// View exposes the frame's view for a test to inspect after Render.
-func (c *Ctx) View() tea.View { return c.app.view }
 
 func clamp(value, low, high int) int { return min(max(value, low), high) }

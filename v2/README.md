@@ -14,8 +14,9 @@ type App struct {
 	router *router.Component
 }
 
-func (a *App) Init(ctx *reactea.Ctx) tea.Cmd { return a.router.Init(ctx) }
-func (a *App) Destroy()                      { a.router.Destroy() }
+func (a *App) Init(ctx *reactea.Ctx) tea.Cmd {
+	return tea.Batch(a.router.Init(ctx), reactea.EnterAltScreen)
+}
 
 func (a *App) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "q" {
@@ -26,8 +27,6 @@ func (a *App) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 }
 
 func (a *App) Render(ctx *reactea.Ctx) string {
-	ctx.AltScreen(true)
-
 	return a.router.Render(ctx)
 }
 
@@ -47,16 +46,51 @@ type Component interface {
 	Init(*Ctx) tea.Cmd
 	Update(*Ctx, tea.Msg) tea.Cmd
 	Render(*Ctx) string
-	Destroy()
 }
 ```
 
-Four methods, one argument in common. `BasicComponent` supplies no-op versions
-of everything but `Render`, so most components only write what they mean.
+Three methods, one argument in common. `BasicComponent` supplies no-op versions
+of `Init` and `Update`, so most components only write what they mean.
 
-Lifecycle is the parent's job: a component that owns children forwards `Init`,
-`Update` and `Destroy` to them, and `Render`s them into whatever boxes it decides
-on. `layout` does this for you in the common cases.
+A component that owns children forwards `Init` and `Update` to them and
+`Render`s them into whatever boxes it decides on. `layout` does this for you in
+the common cases.
+
+`Render` should be a function of the component's state. Terminal features are
+asked for with commands, not while drawing:
+
+```go
+func (c *App) Init(ctx *reactea.Ctx) tea.Cmd {
+	return tea.Batch(reactea.EnterAltScreen, reactea.SetWindowTitle("my-app"))
+}
+```
+
+`EnterAltScreen`, `ExitAltScreen`, `SetWindowTitle`, `SetMouseMode`,
+`SetReportFocus`, `SetBackgroundColor`, `SetForegroundColor` and
+`SetKeyboardEnhancements` all work this way: the App holds what was asked for and
+puts it on every frame. The cursor is the exception — it depends on the layout,
+which only exists while rendering — so it is set through the `Ctx`.
+
+## Cleanup
+
+There is no `Destroy`. A component that owns a resource says so where it acquires
+it:
+
+```go
+func (c *Page) Init(ctx *reactea.Ctx) tea.Cmd {
+	ticker := time.NewTicker(time.Second)
+	ctx.OnDestroy(ticker.Stop)
+
+	return c.poll(ticker.C)
+}
+```
+
+Cleanups belong to a `Scope`. The app has a root scope that closes when the
+program ends — through `tea.Quit`, Ctrl+C or a signal alike — so nothing is
+stranded by a parent that forgot to forward a call. A parent that mounts and
+unmounts children gives each one `ctx.Scope().Child()` and closes it when the
+child goes; `router` and `modal` already do, so routing away from a page runs
+that page's cleanups and nothing else.
 
 ## Ctx
 
@@ -68,13 +102,13 @@ on. `layout` does this for you in the common cases.
 | `Inset(dx, dy, w, h)` | the box for a child, in the parent's coordinates |
 | `Route()`, `PreviousRoute()` | where the app is |
 | `SetRoute(r)`, `Navigate(r)` | commands that move it |
-| `SetCursor`, `CursorAt`, `AltScreen`, `Title`, `MouseMode`, `ReportFocus`, `BackgroundColor`, `ForegroundColor` | the terminal features Bubble Tea v2 moved into `tea.View` |
+| `SetCursor`, `CursorAt` | where the terminal cursor goes this frame |
+| `OnDestroy`, `Scope`, `WithScope` | cleanup, and which scope it belongs to |
 
-Two things follow from `Ctx` carrying an origin. A cursor set through it is
-translated into screen coordinates automatically, however deep the component
-sits, so no parent does offset arithmetic. And decorations are per frame: a
-component that stops asking for the alt-screen gets a view without it, with no
-state to unwind.
+A cursor set through a `Ctx` is translated into screen coordinates
+automatically, however deep the component sits, so no parent does offset
+arithmetic. It is also per frame: a component that stops asking for the cursor
+gets a view without one, with no state to unwind.
 
 Routing is a message, not a mutation. `SetRoute` and `Navigate` return commands,
 so they are safe to issue from a command goroutine, and the move arrives at the
@@ -82,9 +116,9 @@ tree as a `RouteChangedMsg` where every other message arrives.
 
 ## Quitting
 
-`tea.Quit`, Ctrl+C and a `SIGTERM` all run the tree's `Destroy` before the
-program ends — `App` installs a `tea.WithFilter` to catch the quit before
-Bubble Tea's event loop returns on it.
+`tea.Quit`, Ctrl+C and a `SIGTERM` all close the root scope before the program
+ends — `App` installs a `tea.WithFilter` to catch the quit before Bubble Tea's
+event loop returns on it.
 
 ## Layout
 
@@ -146,7 +180,8 @@ func (p *Page) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 A modal is an ordinary component pushed onto a `modal.Stack`. While it is on top
 it takes the input and the base sees nothing; it finishes with `modal.Return` or
 `modal.Fail`, which pops it and delivers a `modal.Result[T]` to the tree. Nothing
-blocks — no extra goroutine, no channel handshake.
+blocks — no extra goroutine, no channel handshake. Each modal gets its own
+scope, so dismissing one runs exactly its cleanups.
 
 ## Wrapping Bubble Tea models and bubbles widgets
 
@@ -192,6 +227,7 @@ if !strings.Contains(app.View().Content, "Reloading") {
 }
 ```
 
-`App.View()` returns the whole `tea.View`, so cursor, alt-screen and title are
-assertable too. Two apps in one process share nothing, so tests can run in
-parallel.
+`App.View()` returns the whole `tea.View`, so the cursor is assertable too. The
+alt-screen and the title arrive by command, so feed the batch `Init` returns back
+through `Update` before asserting on them. Two apps in one process share nothing,
+so tests can run in parallel.

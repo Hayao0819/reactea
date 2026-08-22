@@ -22,8 +22,6 @@ func Framed(style lipgloss.Style, component reactea.Component) *Frame {
 
 func (f *Frame) Init(ctx *reactea.Ctx) tea.Cmd { return f.component.Init(f.inner(ctx)) }
 
-func (f *Frame) Destroy() { f.component.Destroy() }
-
 func (f *Frame) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	return f.component.Update(f.inner(ctx), msg)
 }

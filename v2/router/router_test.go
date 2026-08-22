@@ -18,7 +18,12 @@ type page struct {
 }
 
 func (c *page) Render(*reactea.Ctx) string { return c.label }
-func (c *page) Destroy()                   { c.destroyed = true }
+
+func (c *page) Init(ctx *reactea.Ctx) tea.Cmd {
+	ctx.OnDestroy(func() { c.destroyed = true })
+
+	return nil
+}
 
 func pages(labels map[string]string) router.Routes {
 	routes := router.Routes{}
@@ -140,11 +145,13 @@ func TestRouteChangeSwapsThePage(t *testing.T) {
 	}
 
 	if !first.(*page).destroyed {
-		t.Error("the replaced page was not destroyed")
+		t.Error("the replaced page's cleanup never ran")
 	}
 }
 
-func TestDestroyReachesTheRoutedPage(t *testing.T) {
+// Closing the app's root scope has to reach a page mounted under the router,
+// without the router being asked to forward anything.
+func TestRootTeardownReachesTheRoutedPage(t *testing.T) {
 	component := router.NewWithRoutes(pages(map[string]string{"default": "PAGE"}))
 
 	app := reactea.New(component, reactea.WithSize(20, 5))
@@ -153,10 +160,36 @@ func TestDestroyReachesTheRoutedPage(t *testing.T) {
 
 	current := component.Current()
 
-	component.Destroy()
+	app.Scope().Close()
 
 	if !current.(*page).destroyed {
-		t.Error("Destroy did not reach the routed page")
+		t.Error("the page's cleanup never ran")
+	}
+}
+
+// A page's cleanups run when it is routed away from, and not before.
+func TestUnmountRunsOnlyThatPagesCleanups(t *testing.T) {
+	component := router.NewWithRoutes(pages(map[string]string{"/a": "A", "/b": "B"}))
+
+	app := reactea.New(component, reactea.WithRoute("/a"), reactea.WithSize(20, 5))
+
+	app.Init()
+
+	first := component.Current().(*page)
+
+	if first.destroyed {
+		t.Fatal("the page was torn down while still mounted")
+	}
+
+	_, cmd := app.Update(app.Ctx().SetRoute("/b")())
+	app.Update(cmd())
+
+	if !first.destroyed {
+		t.Error("the replaced page's cleanup never ran")
+	}
+
+	if second := component.Current().(*page); second.destroyed {
+		t.Error("the new page was torn down on arrival")
 	}
 }
 
