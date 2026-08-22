@@ -14,14 +14,17 @@ type probe struct {
 	label string
 
 	width, height int
+	originX       int
+	originY       int
 	inited        bool
 	destroyed     bool
 	updates       int
 
-	cursor *tea.Cursor
+	cursorX, cursorY int
+	wantsCursor      bool
 }
 
-func (c *probe) Init() tea.Cmd {
+func (c *probe) Init(*reactea.Ctx) tea.Cmd {
 	c.inited = true
 
 	return nil
@@ -29,16 +32,21 @@ func (c *probe) Init() tea.Cmd {
 
 func (c *probe) Destroy() { c.destroyed = true }
 
-func (c *probe) Update(tea.Msg) tea.Cmd {
+func (c *probe) Update(*reactea.Ctx, tea.Msg) tea.Cmd {
 	c.updates++
 
 	return nil
 }
 
-func (c *probe) Render(width, height int) string {
-	c.width, c.height = width, height
+func (c *probe) Render(ctx *reactea.Ctx) string {
+	c.width, c.height = ctx.Size()
+	c.originX, c.originY = ctx.Origin()
 
-	lines := make([]string, height)
+	if c.wantsCursor {
+		ctx.CursorAt(c.cursorX, c.cursorY)
+	}
+
+	lines := make([]string, max(c.height, 1))
 	for i := range lines {
 		lines[i] = c.label
 	}
@@ -46,22 +54,18 @@ func (c *probe) Render(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (c *probe) DecorateView(view *tea.View) {
-	if c.cursor != nil {
-		view.Cursor = c.cursor
-	}
+func render(box *Box, width, height int) *reactea.App {
+	app := reactea.New(box, reactea.WithSize(width, height))
+
+	app.View()
+
+	return app
 }
 
 func TestColumnSplitsHeight(t *testing.T) {
 	header, body, footer := &probe{label: "h"}, &probe{label: "b"}, &probe{label: "f"}
 
-	box := Column(
-		Fixed(1, header),
-		Grow(1, body),
-		Fixed(1, footer),
-	)
-
-	box.Render(20, 10)
+	render(Column(Fixed(1, header), Grow(1, body), Fixed(1, footer)), 20, 10)
 
 	if header.height != 1 || footer.height != 1 {
 		t.Errorf("fixed heights = %d, %d, want 1, 1", header.height, footer.height)
@@ -74,19 +78,23 @@ func TestColumnSplitsHeight(t *testing.T) {
 	if header.width != 20 || body.width != 20 {
 		t.Errorf("cross axis = %d, %d, want 20", header.width, body.width)
 	}
+
+	if body.originY != 1 {
+		t.Errorf("body origin y = %d, want 1", body.originY)
+	}
 }
 
 func TestRowSplitsWidthByWeight(t *testing.T) {
 	sidebar, main := &probe{label: "s"}, &probe{label: "m"}
 
-	Row(Grow(1, sidebar), Grow(3, main)).Render(100, 5)
+	render(Row(Grow(1, sidebar), Grow(3, main)), 100, 5)
 
 	if sidebar.width != 25 || main.width != 75 {
 		t.Errorf("widths = %d, %d, want 25, 75", sidebar.width, main.width)
 	}
 
-	if sidebar.height != 5 {
-		t.Errorf("cross axis = %d, want 5", sidebar.height)
+	if main.originX != 25 {
+		t.Errorf("main origin x = %d, want 25", main.originX)
 	}
 }
 
@@ -135,87 +143,67 @@ func TestFixedLargerThanBoxIsTruncated(t *testing.T) {
 }
 
 func TestBoundedRespectsMinAndMax(t *testing.T) {
-	sizes := distribute(100, []Item{
-		Bounded(1, 0, 20, &probe{}),
-		Grow(1, &probe{}),
-	})
+	sizes := distribute(100, []Item{Bounded(1, 0, 20, &probe{}), Grow(1, &probe{})})
 
-	if sizes[0] != 20 {
-		t.Errorf("max was not applied: %v", sizes)
+	if sizes[0] != 20 || sizes[0]+sizes[1] != 100 {
+		t.Errorf("max: sizes = %v", sizes)
 	}
 
-	if sizes[0]+sizes[1] != 100 {
-		t.Errorf("sizes %v do not fill the box", sizes)
-	}
+	sizes = distribute(10, []Item{Bounded(1, 8, 0, &probe{}), Grow(9, &probe{})})
 
-	sizes = distribute(10, []Item{
-		Bounded(1, 8, 0, &probe{}),
-		Grow(9, &probe{}),
-	})
-
-	if sizes[0] != 8 {
-		t.Errorf("min was not applied: %v", sizes)
-	}
-
-	if sizes[0]+sizes[1] != 10 {
-		t.Errorf("sizes %v do not fill the box", sizes)
+	if sizes[0] != 8 || sizes[0]+sizes[1] != 10 {
+		t.Errorf("min: sizes = %v", sizes)
 	}
 }
 
-// The whole point of the package: a child's cursor comes back in the parent's
-// coordinate space without the parent doing the arithmetic.
+// The whole point of the package: a child's cursor comes back in screen
+// coordinates without the parent doing the arithmetic.
 func TestCursorIsTranslatedByOffset(t *testing.T) {
-	header := &probe{label: "h"}
-	body := &probe{label: "b", cursor: tea.NewCursor(3, 2)}
+	body := &probe{label: "b", wantsCursor: true, cursorX: 3, cursorY: 2}
 
-	box := Column(Fixed(2, header), Grow(1, body))
+	app := render(Column(Fixed(2, &probe{label: "h"}), Grow(1, body)), 20, 10)
 
-	box.Render(20, 10)
+	cursor := app.Ctx().View().Cursor
 
-	view := tea.NewView("")
-
-	box.DecorateView(&view)
-
-	if view.Cursor == nil {
-		t.Fatal("the child cursor did not reach the parent")
+	if cursor == nil {
+		t.Fatal("the child cursor did not reach the app")
 	}
 
-	if view.Cursor.X != 3 || view.Cursor.Y != 4 {
-		t.Errorf("cursor = (%d, %d), want (3, 4)", view.Cursor.X, view.Cursor.Y)
+	if cursor.X != 3 || cursor.Y != 4 {
+		t.Errorf("cursor = (%d, %d), want (3, 4)", cursor.X, cursor.Y)
 	}
 }
 
 func TestRowTranslatesCursorHorizontally(t *testing.T) {
-	sidebar := &probe{label: "s"}
-	main := &probe{label: "m", cursor: tea.NewCursor(1, 1)}
+	main := &probe{label: "m", wantsCursor: true, cursorX: 1, cursorY: 1}
 
-	box := Row(Fixed(10, sidebar), Grow(1, main))
+	app := render(Row(Fixed(10, &probe{label: "s"}), Grow(1, main)), 40, 5)
 
-	box.Render(40, 5)
+	cursor := app.Ctx().View().Cursor
 
-	view := tea.NewView("")
-
-	box.DecorateView(&view)
-
-	if view.Cursor.X != 11 || view.Cursor.Y != 1 {
-		t.Errorf("cursor = (%d, %d), want (11, 1)", view.Cursor.X, view.Cursor.Y)
+	if cursor.X != 11 || cursor.Y != 1 {
+		t.Errorf("cursor = (%d, %d), want (11, 1)", cursor.X, cursor.Y)
 	}
 }
 
-func TestDecorationsMerge(t *testing.T) {
-	first := &probe{label: "a"}
-	second := &probe{label: "b"}
+// Update must see the same split Render does, without Render having run first.
+func TestUpdateSeesTheSameSplit(t *testing.T) {
+	body := &probe{label: "b"}
 
-	box := Column(Grow(1, first), Grow(1, second))
-	box.Render(10, 4)
+	box := Column(Fixed(2, &probe{label: "h"}), Grow(1, body))
 
-	view := tea.NewView("")
-	view.WindowTitle = "kept"
+	app := reactea.New(box, reactea.WithSize(20, 10))
 
-	box.DecorateView(&view)
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
-	if view.WindowTitle != "kept" {
-		t.Errorf("an empty child title overwrote the parent's: %q", view.WindowTitle)
+	if body.updates != 1 {
+		t.Fatalf("body saw %d updates", body.updates)
+	}
+
+	app.View()
+
+	if body.height != 8 || body.originY != 2 {
+		t.Errorf("body box = %dx%d at y=%d", body.width, body.height, body.originY)
 	}
 }
 
@@ -224,8 +212,10 @@ func TestLifecycleReachesEveryItem(t *testing.T) {
 
 	box := Column(Grow(1, first), Grow(1, second))
 
-	box.Init()
-	box.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	app := reactea.New(box, reactea.WithSize(10, 4))
+
+	app.Init()
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	box.Destroy()
 
 	for _, c := range []*probe{first, second} {
@@ -236,12 +226,9 @@ func TestLifecycleReachesEveryItem(t *testing.T) {
 }
 
 func TestRenderJoinsChildren(t *testing.T) {
-	box := Column(
-		Fixed(1, reactea.StaticComponent("top")),
-		Fixed(1, reactea.StaticComponent("bottom")),
-	)
+	box := Column(Fixed(1, reactea.Text("top")), Fixed(1, reactea.Text("bottom")))
 
-	rendered := box.Render(10, 2)
+	rendered := reactea.New(box, reactea.WithSize(10, 2)).View().Content
 
 	if !strings.Contains(rendered, "top") || !strings.Contains(rendered, "bottom") {
 		t.Errorf("render = %q", rendered)

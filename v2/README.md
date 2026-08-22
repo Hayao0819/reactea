@@ -1,360 +1,197 @@
-# <p align="center">Reactea</p>
+# reactea v2
 
-<div align="center">
+A companion to [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) that
+adds a component hierarchy, routing, layout and modals.
 
-[![Latest](https://img.shields.io/github/v/tag/Hayao0819/reactea?label=latest)](https://img.shields.io/github/v/tag/Hayao0819/reactea?label=latest)
-[![build](https://github.com/Hayao0819/reactea/actions/workflows/build.yml/badge.svg)](https://github.com/Hayao0819/reactea/actions/workflows/build.yml)
-![Codecov](https://img.shields.io/codecov/c/github/Londek/reactea)
-[![Go Reference](https://pkg.go.dev/badge/github.com/Hayao0819/reactea.svg)](https://pkg.go.dev/github.com/Hayao0819/reactea)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Hayao0819/reactea)](https://goreportcard.com/report/github.com/Hayao0819/reactea)
+```sh
+go get github.com/Hayao0819/reactea/v2
+```
 
-<p align="center">reactea for Bubbletea v2 (module <code>github.com/Hayao0819/reactea/v2</code>).</p>
-
-Rather simple **Bubbletea companion** for **handling hierarchy**, support for **lifting state up.**\
-It Reactifies Bubbletea philosophy and makes it especially easy to work with in bigger projects.
-
-For me, personally - **It's a must** in project with multiple pages and component communication
-
-Check our quickstart [right here](#quickstart) or other examples [here!](/examples)
-
-`go get -u github.com/Hayao0819/reactea/v2`
-</div>
-
-## General info
-
-The goal is to create components that are
-
-- dimensions-aware (especially unify all setSize conventions)
-- scallable
-- more robust
-- easier to code
-- all of that without code duplication
-
-Extreme performance is not main goal of this package, however it should not be
-that far off actual Bubbletea which is already blazing fast.
-Most info is currently in source code so I suggest checking it out
-
-Always return `reactea.Destroy` instead of `tea.Quit` in order to follow our convention (that way Destroy() will be called on your components)
-
-## [Quickstart](/examples/quickstart)
-
-Reactea unlike Bubbletea implements two-way communication, very React-like communication.\
-If you have experience with React you are gonna love Reactea straight away!
-
-In this tutorial we are going to make application that consists of 2 pages.
-
-- The `/input` (aka `index`, in reactea `default`) page for inputting your name
-- The `/displayname` page for displaying your name
-
-### [Lifecycle](#component-lifecycle)
-
-More detailed docs about component lifecycle can be found [here](#component-lifecycle), we are only gonna go through basics.
-
-Reactea component lifecycle consists of 4 methods (while Bubbletea only 3)
-|Method|Purpose|
-|-|-|
-| `Init() tea.Cmd` | It's called first. All critical stuff should happen here. It also supports IO through tea.Cmd |
-| `Update(tea.Msg) tea.Cmd` | It reacts to Bubbletea IO and updates state accordingly |
-| `Render(int, int) string` | It renders the UI. The two arguments are width and height, they should be calculated by parent |
-| `Destroy()` | It's called whenever Component is about to end it's lifecycle. Please note that it's parent's responsibility to call `Destroy()` |
-
-Let's get to work!
-
-### The `/input` page
-
-`/pages/input/input.go`
+## Quickstart
 
 ```go
-type Component struct {
-    reactea.BasicComponent                // It implements all reactea's core functionalities
-
-    // Props
-    SetText func(string)
-
-    textinput textinput.Model             // Input for inputting name
+type App struct {
+	router *router.Component
 }
 
-func New() *Component {
-    return &Component{textinput: textinput.New()}
+func (a *App) Init(ctx *reactea.Ctx) tea.Cmd { return a.router.Init(ctx) }
+func (a *App) Destroy()                      { a.router.Destroy() }
+
+func (a *App) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "q" {
+		return tea.Quit
+	}
+
+	return a.router.Update(ctx, msg)
 }
 
-func (c *Component) Init() tea.Cmd {
-    return c.textinput.Focus()
+func (a *App) Render(ctx *reactea.Ctx) string {
+	ctx.AltScreen(true)
+
+	return a.router.Render(ctx)
 }
 
-func (c *Component) Update(msg tea.Msg) tea.Cmd {
-    switch msg := msg.(type) {
-    case tea.KeyMsg:
-        if msg.Type == tea.KeyEnter {
-            // Lifted state power! Woohooo
-            c.SetText(c.textinput.Value())
+func main() {
+	app := reactea.New(&App{router: router.NewWithRoutes(routes)})
 
-            // Navigate to displayname, please
-            reactea.SetRoute("/displayname")
-            return nil
-        }
-    }
-
-    var cmd tea.Cmd
-    c.textinput, cmd = c.textinput.Update(msg)
-    return cmd
-}
-
-// Here we are not using width and height, but you can!
-func (c *Component) Render(int, int) string {
-    return fmt.Sprintf("Enter your name: %s\nAnd press [ Enter ]", c.textinput.View())
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
-#### The `/displayname` page
-
-`/pages/displayname/displayname.go`
+## The component
 
 ```go
-import (
- "fmt"
-)
-
-// Our prop(s) is a string itself!
-type Props = string
-
-// Stateless components?!?!
-func Render(text Props, width, height int) string {
-    return fmt.Sprintf("OMG! Hello %s!", text)
+type Component interface {
+	Init(*Ctx) tea.Cmd
+	Update(*Ctx, tea.Msg) tea.Cmd
+	Render(*Ctx) string
+	Destroy()
 }
 ```
 
-### Main component
+Four methods, one argument in common. `BasicComponent` supplies no-op versions
+of everything but `Render`, so most components only write what they mean.
 
-`/app/app.go`
+Lifecycle is the parent's job: a component that owns children forwards `Init`,
+`Update` and `Destroy` to them, and `Render`s them into whatever boxes it decides
+on. `layout` does this for you in the common cases.
 
-```go
-type Component struct {
-    reactea.BasicComponent                // It implements all reactea's core functionalities
+## Ctx
 
-    mainRouter *router.Component
+`Ctx` is what a component is told about the frame it is taking part in.
 
-    text string // The name
-}
+| | |
+|---|---|
+| `Size()`, `Width()`, `Height()` | the box this component may draw into |
+| `Inset(dx, dy, w, h)` | the box for a child, in the parent's coordinates |
+| `Route()`, `PreviousRoute()` | where the app is |
+| `SetRoute(r)`, `Navigate(r)` | commands that move it |
+| `SetCursor`, `CursorAt`, `AltScreen`, `Title`, `MouseMode`, `ReportFocus`, `BackgroundColor`, `ForegroundColor` | the terminal features Bubble Tea v2 moved into `tea.View` |
 
-func New() *Component {
-    c := &Component{}
+Two things follow from `Ctx` carrying an origin. A cursor set through it is
+translated into screen coordinates automatically, however deep the component
+sits, so no parent does offset arithmetic. And decorations are per frame: a
+component that stops asking for the alt-screen gets a view without it, with no
+state to unwind.
 
-    // Does it remind you of something? react-router!
-    c.mainRouter = router.NewWithRoutes(router.Routes{
-        "default": func(router.Params) reactea.Component {
-			component := input.New()
+Routing is a message, not a mutation. `SetRoute` and `Navigate` return commands,
+so they are safe to issue from a command goroutine, and the move arrives at the
+tree as a `RouteChangedMsg` where every other message arrives.
 
-			component.SetText = c.setText
+## Quitting
 
-			return component
-		},
-		"/displayname": func(router.Params) reactea.Component {
-            // RouteInitializer requires Component so we have to convert
-            // Stateless component (renderer) to Component
-			return reactea.Componentify(displayname.Render, c.text)
-		},
-    })
-
-    return c
-}
-
-func (c *Component) Init() tea.Cmd {
-    return c.mainRouter.Init()
-}
-
-func (c *Component) Update(msg tea.Msg) tea.Cmd {
-    switch msg := msg.(type) {
-    case tea.KeyMsg:
-        // ctrl+c support 
-        if msg.String() == "ctrl+c" {
-            return reactea.Destroy
-        }
-    }
-
-    return c.mainRouter.Update(msg)
-}
-
-func (c *Component) Render(width, height int) string {
-    return c.mainRouter.Render(width, height)
-}
-
-func (c *Component) setText(text string) {
-    c.text = text
-}
-```
-
-#### Main
-
-`main.go`
-
-```go
-// reactea.NewProgram initializes program with
-// "translation layer", so Reactea components work
-program := reactea.NewProgram(app.New())
-
-if _, err := program.Run(); err != nil {
-    panic(err)
-}
-```
-
-## Component lifecycle
-
-![Component lifecycle image](.github/lifecycle-diagram.png)
-
-Reactea component lifecycle consists of 4 methods (while Bubbletea only 3)
-|Method|Purpose|
-|-|-|
-| `Init() tea.Cmd` | It's called first. All critical stuff should happen here. It also supports IO through tea.Cmd |
-| `Update(tea.Msg) tea.Cmd` | It reacts to Bubbletea IO and updates state accordingly |
-| `Render(int, int) string` | It renders the UI. The two arguments are width and height, they should be calculated by parent |
-| `Destroy()` | It's called whenever Component is about to end it's lifecycle. Please note that it's parent's responsibility to call `Destroy()` |
-
-Reactea takes pointer approach for components making state modifiable in any lifecycle method\
-
-### Notes
-
-`Update()` **IS NOT** guaranteed to be called on first-run, `Init()` for most part is, and critical logic should be there
-
-## Decorating the view
-
-Bubbletea v2 moved the alt-screen, the cursor, the window title, mouse mode and
-the terminal colors out of commands and options into the `tea.View` the root
-model returns. Components still render to a string, so a component that needs
-one of those implements `ViewDecorator`
-
-```go
-func (c *Component) DecorateView(view *tea.View) {
-    view.AltScreen = true
-    view.Cursor = tea.NewCursor(c.cursorX, c.cursorY)
-}
-```
-
-Only the root component is asked directly. A composite passes the view on to the
-children it renders with `reactea.DecorateView(child, view)`; `router.Component`
-and `modal.Controller` already do. Cursor positions are relative to the child's
-own render, so a parent that draws a child at an offset applies
-`reactea.TranslateCursor(view, dx, dy)` after collecting it.
-
-`Reactify` forwards the wrapped model's cursor, and nothing else from its view.
+`tea.Quit`, Ctrl+C and a `SIGTERM` all run the tree's `Destroy` before the
+program ends — `App` installs a `tea.WithFilter` to catch the quit before
+Bubble Tea's event loop returns on it.
 
 ## Layout
 
-`Render(int, int)` hands a component its box, but working out each child's box
-was left to the parent. The `layout` package does it along one axis, the way a
-single-axis flexbox does.
-
 ```go
 layout.Column(
-    layout.Fixed(1, header),
-    layout.Grow(1, page),
-    layout.Fixed(1, footer),
+	layout.Fixed(1, header),
+	layout.Grow(1, layout.Row(
+		layout.Fixed(16, layout.Framed(paneStyle, sidebar)),
+		layout.Grow(1, layout.Framed(paneStyle, pages)),
+	)),
+	layout.Fixed(1, footer),
 )
 ```
 
 `Fixed` takes exactly that many cells, `Grow` takes a share of what is left
 weighted against the other growing items, and `Bounded` is `Grow` with a floor
-and a ceiling. Every cell is handed out — the remainder from an uneven split goes
+and a ceiling. Every cell is handed out: the remainder from an uneven split goes
 to the items with the largest fractional share, so three `Grow(1, …)` items in a
-10-cell box get 4, 3 and 3, never 3, 3 and 3. Items get the full cross axis.
+10-cell box get 4, 3 and 3.
 
-A `Box` is itself a `Component`, so it nests, and it forwards `Init`, `Update`
-and `Destroy` to every item. It also remembers where it placed each child, which
-means **it translates their cursors for you** — the offset arithmetic that
-`TranslateCursor` otherwise leaves to the parent. Child decorations are merged
-field by field rather than last-one-wins: an empty title or a nil cursor from one
-child no longer wipes out what a sibling asked for.
+`Framed` draws a lipgloss style around a component. Lipgloss counts `Width` and
+`Height` as the outer size, so the child is rendered at the box minus the border,
+padding and margin, and its cursor shifted to match.
 
-### Borders and padding
+A `Box` recomputes its split in each phase rather than caching it from the last
+`Render`, so `Update` and `Render` can be called in any order.
 
-Lipgloss styling needs nothing from reactea — `Render` returns a string, so style
-it. The one thing worth a helper is the frame. Lipgloss counts `Width`/`Height`
-as the **outer** size, so a bordered child has to be rendered at the box minus the
-frame, and its cursor shifted by the border and padding on the top left.
-`Framed` does both.
+## Routing
 
 ```go
-layout.Framed(
-    lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2),
-    page,
-)
+router.NewWithRoutes(router.Routes{
+	"/user/settings": func(router.Params) reactea.Component { return settings.New() },
+	"/user/:id":      func(p router.Params) reactea.Component { return profile.New(p["id"]) },
+	"default":        func(router.Params) reactea.Component { return home.New() },
+})
 ```
 
-A `Frame` is a `Component`, so it nests inside a `Box` and the offsets stack.
+Placeholders capture params (`:id`), may be optional (`?:id`) or a trailing
+catch-all (`+?:rest`). When more than one matches, the most specific wins —
+literal over param over optional over catch-all, with a string tie-break, so the
+choice never depends on Go's map iteration order. Set `NotFound` for a page of
+your own; otherwise an unmatched route renders a plain message.
 
-## Wrapping Bubbletea models and bubbles widgets
+## Modals
+
+```go
+func (p *Page) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		return p.stack.Push(&NameInput{})
+	case modal.Result[string]:
+		p.name = msg.Value
+	}
+
+	return nil
+}
+```
+
+A modal is an ordinary component pushed onto a `modal.Stack`. While it is on top
+it takes the input and the base sees nothing; it finishes with `modal.Return` or
+`modal.Fail`, which pops it and delivers a `modal.Result[T]` to the tree. Nothing
+blocks — no extra goroutine, no channel handshake.
+
+## Wrapping Bubble Tea models and bubbles widgets
 
 The two need different adapters, because a bubbles widget is not a `tea.Model`
-and never has been — not in v1 either. A widget's `Update` returns its own
-concrete type (`func (m Model) Update(tea.Msg) (Model, tea.Cmd)`) so that you can
-write `m.input, cmd = m.input.Update(msg)` without a type assertion, and Go has
-no covariant returns. In v2 the `View() string` signature is a second mismatch.
+and never has been. A widget's `Update` returns its own concrete type
+(`func (m Model) Update(tea.Msg) (Model, tea.Cmd)`) so that you can write
+`m.input, cmd = m.input.Update(msg)` without a type assertion, and Go has no
+covariant returns. In v2 the `View() string` signature is a second mismatch.
 
-|                     | Wraps                          | Constraint            |
-|---------------------|--------------------------------|-----------------------|
-| `Reactify`          | a self-contained Bubbletea model | `tea.Model`         |
-| `ReactifyWidget`    | a bubbles widget                 | `Widget[T]`         |
+| | Wraps | Constraint |
+|---|---|---|
+| `Reactify` | a self-contained Bubble Tea model | `tea.Model` |
+| `ReactifyWidget` | a bubbles widget | `Widget[T]` |
 
 ```go
 input := textinput.New()
 input.SetVirtualCursor(false)
 input.Focus()
 
-component := reactea.ReactifyWidget(input) // reactea.Component
+component := reactea.ReactifyWidget(input)
 ```
 
 `ReactifyWidget` stores the widget value back after every `Update`, calls the
-widget's `Init()` when it has one, and reports its cursor through
-`DecorateView`. Widgets draw a virtual cursor into their string by default and
-report no real cursor in that mode; reactea leaves that choice to you.
+widget's `Init()` when it has one, and reports its cursor through the `Ctx`.
+Widgets draw a virtual cursor into their string by default and report no real
+cursor in that mode; reactea leaves that choice to you.
 
-## Stateless components
+An interface whose `Update` returns the interface itself also fits `Widget[T]` —
+name it as the type argument, as in `ReactifyWidget[huh.Model](form)`.
 
-Stateless components are represented by following function types
+## Testing
 
-|                | Renderer[TProps any]     | ProplessRenderer   | DumbRenderer  |
-|----------------|:------------------------:|:------------------:|:-------------:|
-| **Properties** | ✅                       | ❌                | ❌            |
-| **Dimensions** | ✅                       | ✅                | ❌            |
-| **Arguments** | `TProps, int, int`        | `int, int`         | ❌            |
+An `App` runs without a terminal, which is all a component test needs.
 
-There are many utility functions for transforming stateless into stateful components or for rendering any component without knowing its type (`reactea.RenderAny`)
+```go
+app := reactea.New(page, reactea.WithSize(70, 20), reactea.WithRoute("/inbox"))
 
-## Routes API
+app.Init()
+app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
-Routes API allows developers for easy development of multi-page apps.
-They are kind of substitute for window.Location inside Bubbletea
+if !strings.Contains(app.View().Content, "Reloading") {
+	t.Error(...)
+}
+```
 
-### reactea.CurrentRoute() Route
-
-Returns current route
-
-### reactea.LastRoute() Route
-
-Returns last route
-
-### reactea.WasRouteChanged() bool
-
-returns `LastRoute() != CurrentRoute()`
-
-## Reactea Routes now support params
-
-Params have been introduced in order to allow routes like: `/teams/123/player/4`
-
-Params have to follow regex `^:.*$`\
-`^` being beginning of current path level (`/^level/`)\
-`$`being end of current path level (`/level$/`)
-
-Note that params support wildcards with single `:`, like `/teams/:/player`. `/teams/123/player`, `/teams/456/player` etc will be matched no matter what and param will be ignored in param map.
-
-## Router Component
-
-`router.Component` is a basic router. Give it routes with `router.NewWithRoutes(router.Routes{...})` or the `Routes` field on `New()`.
-
-It matches route placeholders, including the params and wildcards described above. When more than one placeholder matches, the most specific wins: literal segments beat params, which beat catch-alls. Relative navigation is a separate concern, handled by `reactea.Navigate`.
-
-### router.Routes
-
-`router.Routes` is `map[string]RouteInitializer` keyed by route placeholder.
-
-`RouteInitializer` is a `func(router.Params) reactea.Component` that builds the component for a matched route.
+`App.View()` returns the whole `tea.View`, so cursor, alt-screen and title are
+assertable too. Two apps in one process share nothing, so tests can run in
+parallel.

@@ -1,303 +1,65 @@
-package reactea
+package reactea_test
 
 import (
-	"bytes"
 	"reflect"
-	"strings"
 	"testing"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
+	"github.com/Hayao0819/reactea/v2"
 )
 
-func TestRoutePanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("expected panic, but it didn't")
-		} else {
-			if r != "tried updating global route not in update" {
-				t.Errorf("expected panic, got it, but with invalid message, got \"%s\", expected \"tried updating global route not in update\"", r)
-			}
-		}
-	}()
-
-	root := &mockComponent[struct{}]{}
-
-	NewProgram(root, tea.WithoutRenderer())
-
-	SetRoute("/shouldFail")
-}
-
-// Expecting:
-// / -> /foo -> /foo/bar -> /baz -> / -> /foo -> /bar -> /test -> / -> / -> /foo -> /bar
-func TestNavigate(t *testing.T) {
-	type testState struct {
-		routeHistory []string
-		step         int
-	}
-
-	root := &mockComponent[testState]{
-		initFunc: func(Component, *testState) tea.Cmd {
-			return Rerender
-		},
-		updateFunc: func(c Component, s *testState, msg tea.Msg) tea.Cmd {
-			switch s.step {
-			case 0:
-				// Don't navigate
-			case 1:
-				Navigate("foo")
-			case 2:
-				Navigate("foo/bar")
-			case 3:
-				Navigate("/baz")
-			case 4:
-				Navigate("..")
-			case 5:
-				Navigate("./foo")
-			case 6:
-				Navigate(".//bar")
-			case 7:
-				Navigate("../../test")
-			case 8:
-				Navigate("/")
-			case 9:
-				Navigate("")
-			case 10:
-				Navigate(".")
-			case 11:
-				Navigate("foo")
-			case 12:
-				Navigate("foo/bar")
-			case 13:
-				Navigate("baz")
-			default:
-				return Destroy
-			}
-
-			s.routeHistory = append(s.routeHistory, CurrentRoute())
-
-			s.step += 1
-
-			return Rerender
-		},
-	}
-
-	program := NewProgram(root, tea.WithoutRenderer(), WithoutInput())
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	expectedRouteHistory := []string{
-		"/",
-		"/foo",
-		"/foo/bar",
-		"/baz",
-		"/",
-		"/foo",
-		"/bar",
-		"/test",
-		"/",
-		"/",
-		"/",
-		"/foo",
-		"/foo/bar",
-		"/foo/baz",
-	}
-
-	if strings.Join(root.state.routeHistory, " - ") != strings.Join(expectedRouteHistory, " - ") {
-		t.Errorf("wrong route history, expected \"%s\", got \"%s\". Note that routes are delimited by \" - \"", strings.Join(expectedRouteHistory, " - "), strings.Join(root.state.routeHistory, " - "))
-	}
-}
-
-// A change followed by a revert within a single Update must not report a net
-// route change, otherwise the router would needlessly Destroy and re-init the
-// current component.
-func TestSetRouteRevertWithinUpdate(t *testing.T) {
-	isUpdate = true // SetRoute panics outside an update; emulate being inside one
-
-	defer func() {
-		isUpdate = false
-		currentRoute = "/"
-		lastRoute = "/"
-		wasRouteChanged = false
-	}()
-
-	currentRoute = "/"
-	lastRoute = "/"
-	wasRouteChanged = false
-
-	SetRoute("/a")
-	if !WasRouteChanged() {
-		t.Fatalf("expected a route change after SetRoute(\"/a\")")
-	}
-	if CurrentRoute() != "/a" {
-		t.Fatalf("expected current route \"/a\", got %q", CurrentRoute())
-	}
-	if LastRoute() != "/" {
-		t.Fatalf("expected last route \"/\", got %q", LastRoute())
-	}
-
-	// Revert to the original route: the net change is nothing.
-	SetRoute("/")
-	if WasRouteChanged() {
-		t.Errorf("change-then-revert within one update must not report a change")
-	}
-	if CurrentRoute() != "/" {
-		t.Errorf("expected current route \"/\", got %q", CurrentRoute())
-	}
-
-	// A genuine subsequent change still registers, still relative to the
-	// pre-update route.
-	SetRoute("/b")
-	if !WasRouteChanged() {
-		t.Errorf("expected a route change after SetRoute(\"/b\")")
-	}
-	if LastRoute() != "/" {
-		t.Errorf("expected last route to stay \"/\", got %q", LastRoute())
-	}
-}
-
-// Navigate must not panic slicing currentRoute even if currentRoute is somehow
-// malformed (not root-prefixed).
-func TestNavigateMalformedCurrentRoute(t *testing.T) {
-	isUpdate = true
-
-	defer func() {
-		isUpdate = false
-		currentRoute = "/"
-		lastRoute = "/"
-		wasRouteChanged = false
-	}()
-
-	currentRoute = "malformed"
-	lastRoute = "malformed"
-	wasRouteChanged = false
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("Navigate panicked on malformed currentRoute: %v", r)
-		}
-	}()
-
-	Navigate("foo")
-
-	if CurrentRoute() != "/foo" {
-		t.Errorf("expected current route \"/foo\", got %q", CurrentRoute())
-	}
-}
-
-func TestRoutePlaceholderMatching(t *testing.T) {
-	testCases := []struct {
-		route, placeholder string
-		expected           map[string]string
+func TestResolve(t *testing.T) {
+	cases := []struct {
+		base, target, want string
 	}{
-		// Matching against non-root routes is forbidden
-		{"", "", nil},
-		{"invalidRoute", "", nil},
-		{"", "invalidPlaceholder", nil},
-		{"/invalidRoute", "invalidPlaceholder", nil},
-
-		{"/teams/foo", "/teams", nil},
-		{"/teams", "/teams/foo", nil},
-		{"/", "/teams", nil},
-		{"/teams", "/", nil},
-		{"/teams", "/teams", map[string]string{"$": "/teams"}},
-
-		{"/teams", "/teams/?:", map[string]string{"$": "/teams"}},
-		{"/teams/123", "/teams/?:", map[string]string{"$": "/teams/123"}},
-		{"/teams/123/456", "/teams/?:", nil},
-		{"/teams", "/teams/?:teamId", map[string]string{"$": "/teams", "teamId": ""}},
-		{"/teams/123", "/teams/?:teamId", map[string]string{"$": "/teams/123", "teamId": "123"}},
-		{"/teams/123/456", "/teams/?:teamId", nil},
-
-		{"/teams/123/456", "/teams/123/456/+?:foo", map[string]string{"$": "/teams/123/456", "foo": ""}},
-		{"/teams/123/456", "/teams/+?:foo", map[string]string{"$": "/teams/123/456", "foo": "123/456"}},
-		{"/teams/123/456", "/teams/+?:", map[string]string{"$": "/teams/123/456"}},
-		{"/teams/123", "/teams/+?:", map[string]string{"$": "/teams/123"}},
-		{"/teams", "/teams/+?:", map[string]string{"$": "/teams"}},
-
-		{"/teams/123", "/teams/:teamId", map[string]string{"$": "/teams/123", "teamId": "123"}},
-		{"/teams/foo/234", "/teams/:/:teamId", map[string]string{"$": "/teams/foo/234", "teamId": "234"}},
-		{"/teams/123/234", "/teams/:teamId/:teamId", map[string]string{"$": "/teams/123/234", "teamId": "234"}},
-		{"/teams/123/234", "/teams/:teamId/:playerId", map[string]string{"$": "/teams/123/234", "teamId": "123", "playerId": "234"}},
-
-		{"/detail/abcgsd-dsfhh2342-sdfhs-234", "/detail/:id", map[string]string{"$": "/detail/abcgsd-dsfhh2342-sdfhs-234", "id": "abcgsd-dsfhh2342-sdfhs-234"}},
+		{"/a/b", "/c", "/c"},
+		{"/a/b", "c", "/a/b/c"},
+		{"/a/b", "..", "/a"},
+		{"/a/b", "../..", "/"},
+		{"/a/b", "../../..", "/"},
+		{"/a/b", ".", "/a/b"},
+		{"/a/b", "", "/a/b"},
+		{"/", "x", "/x"},
+		{"nonsense", "x", "/nonsense/x"},
 	}
 
-	for _, testCase := range testCases {
-		got, ok := RouteMatchesPlaceholder(testCase.route, testCase.placeholder)
+	for _, tc := range cases {
+		if got := reactea.Resolve(tc.base, tc.target); got != tc.want {
+			t.Errorf("Resolve(%q, %q) = %q, want %q", tc.base, tc.target, got, tc.want)
+		}
+	}
+}
 
-		if testCase.expected == nil {
-			if !ok {
-				continue
-			}
+func TestMatchRoute(t *testing.T) {
+	cases := []struct {
+		route, placeholder string
+		want               map[string]string
+		ok                 bool
+	}{
+		{"/", "/", map[string]string{"$": "/"}, true},
+		{"/a", "/a", map[string]string{"$": "/a"}, true},
+		{"/a", "/b", nil, false},
+		{"/teams/9", "/teams/:id", map[string]string{"$": "/teams/9", "id": "9"}, true},
+		{"/teams/9/1", "/teams/:id", nil, false},
+		{"/teams", "/teams/?:id", map[string]string{"$": "/teams", "id": ""}, true},
+		{"/teams/9", "/teams/?:id", map[string]string{"$": "/teams/9", "id": "9"}, true},
+		{"/a/b/c", "/a/+?:rest", map[string]string{"$": "/a/b/c", "rest": "b/c"}, true},
+		{"/a", "/a/+?:rest", map[string]string{"$": "/a", "rest": ""}, true},
+		{"/a/b", "/a/:", map[string]string{"$": "/a/b"}, true},
+		{"a", "/a", nil, false},
+		{"/a", "a", nil, false},
+	}
 
-			t.Errorf("Bad result. Route: \"%s\", Placeholder: \"%s\". Expected not ok, got ok", testCase.route, testCase.placeholder)
+	for _, tc := range cases {
+		got, ok := reactea.MatchRoute(tc.route, tc.placeholder)
+
+		if ok != tc.ok {
+			t.Errorf("MatchRoute(%q, %q) ok = %v, want %v", tc.route, tc.placeholder, ok, tc.ok)
+
 			continue
 		}
 
-		if !reflect.DeepEqual(got, testCase.expected) {
-			t.Errorf("Bad result. Route: \"%s\", Placeholder: \"%s\". Expected %v, got %v", testCase.route, testCase.placeholder, testCase.expected, got)
+		if ok && !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("MatchRoute(%q, %q) = %v, want %v", tc.route, tc.placeholder, got, tc.want)
 		}
-	}
-}
-
-type routeReadingComponent struct {
-	BasicComponent
-
-	n int
-}
-
-func (c *routeReadingComponent) Render(int, int) string { return "" }
-
-func (c *routeReadingComponent) Update(msg tea.Msg) tea.Cmd {
-	if _, ok := msg.(tea.WindowSizeMsg); !ok {
-		return nil
-	}
-
-	c.n++
-	if c.n > 50 {
-		return Destroy
-	}
-
-	if c.n%2 == 0 {
-		SetRoute("/a")
-	} else {
-		SetRoute("/")
-	}
-
-	if c.n > 1 {
-		return nil
-	}
-
-	// Reactea runs every command on its own goroutine, so a command that reads
-	// the route while it works must not race the event loop writing it.
-	return func() tea.Msg {
-		deadline := time.Now().Add(100 * time.Millisecond)
-		for time.Now().Before(deadline) {
-			_ = CurrentRoute()
-		}
-
-		return nil
-	}
-}
-
-func TestRouteReadableFromCommandGoroutine(t *testing.T) {
-	var in, out bytes.Buffer
-
-	in.WriteString("123")
-
-	program := NewProgram(&routeReadingComponent{}, tea.WithInput(&in), tea.WithOutput(&out))
-
-	go func() {
-		for i := 0; i < 60; i++ {
-			time.Sleep(time.Millisecond)
-			program.Send(tea.WindowSizeMsg{Width: 10, Height: 10})
-		}
-	}()
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
 	}
 }

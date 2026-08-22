@@ -1,7 +1,7 @@
-package reactea
+package reactea_test
 
 import (
-	"fmt"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/stopwatch"
@@ -9,194 +9,126 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/Hayao0819/reactea/v2"
 )
-
-// counterModel is a value-receiver tea.Model (like bubbles widgets): its Update
-// returns a NEW model value rather than mutating the receiver.
-type counterModel struct {
-	n int
-}
-
-func (m counterModel) Init() tea.Cmd { return nil }
-
-func (m counterModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(tea.KeyMsg); ok {
-		m.n++
-	}
-
-	return m, nil
-}
-
-func (m counterModel) View() tea.View { return tea.NewView(fmt.Sprintf("count:%d", m.n)) }
-
-// Reactified must satisfy the Component interface.
-var _ Component = (*Reactified[counterModel])(nil)
-
-// Because Renderer[TProps] is a type alias, a Renderer-typed value satisfies
-// the AnyRenderer constraint directly — no explicit conversion. This wouldn't
-// compile if Renderer were a distinct defined type.
-func TestRendererAliasNeedsNoCast(t *testing.T) {
-	var r Renderer[string] = func(s string, width, height int) string {
-		return s
-	}
-
-	if got := RenderAny(r, "hi", 0, 0); got != "hi" {
-		t.Errorf("RenderAny: expected \"hi\", got %q", got)
-	}
-
-	if got := Componentify(r, "hi").Render(0, 0); got != "hi" {
-		t.Errorf("Componentify: expected \"hi\", got %q", got)
-	}
-
-	if got := PropfulToLess(r, "hi")(0, 0); got != "hi" {
-		t.Errorf("PropfulToLess: expected \"hi\", got %q", got)
-	}
-}
-
-func TestReactify(t *testing.T) {
-	c := Reactify(counterModel{})
-
-	key := tea.KeyPressMsg{Code: 'a', Text: "a"}
-	c.Update(key)
-	c.Update(key)
-
-	// Without storing the model Update returns back into c.Model, a
-	// value-receiver widget would reset to zero every Update.
-	if c.Model.n != 2 {
-		t.Errorf("expected wrapped model state to persist, got n=%d", c.Model.n)
-	}
-
-	if result := c.Render(0, 0); result != "count:2" {
-		t.Errorf("expected Render to delegate to View, got %q", result)
-	}
-}
-
-func TestRenderAny(t *testing.T) {
-	t.Run("renderer", func(t *testing.T) {
-		renderer := func(struct{}, int, int) string {
-			return "working"
-		}
-
-		if result := RenderAny(renderer, struct{}{}, 1, 1); result != "working" {
-			t.Errorf("invalid result, expected \"working\", got \"%s\"", result)
-		}
-	})
-
-	t.Run("proplessRenderer", func(t *testing.T) {
-		proplessRenderer := func(int, int) string {
-			return "working"
-		}
-
-		if result := RenderAny(proplessRenderer, struct{}{}, 1, 1); result != "working" {
-			t.Errorf("invalid result, expected \"working\", got \"%s\"", result)
-		}
-	})
-
-	t.Run("dumbRenderer", func(t *testing.T) {
-		dumbRenderer := func() string {
-			return "working"
-		}
-
-		if result := RenderAny(dumbRenderer, struct{}{}, 1, 1); result != "working" {
-			t.Errorf("invalid result, expected \"working\", got \"%s\"", result)
-		}
-	})
-}
-
-func TestPropfulToLess(t *testing.T) {
-	renderer := func(struct{}, int, int) string {
-		return "working"
-	}
-
-	proplessRenderer := PropfulToLess(renderer, struct{}{})
-
-	if result := proplessRenderer(1, 1); result != "working" {
-		t.Errorf("wrapped value doesn't render correctly, expected \"working\", got \"%s\"", result)
-	}
-}
-
-func TestComponentify(t *testing.T) {
-	t.Run("renderer", func(t *testing.T) {
-		renderer := func(struct{}, int, int) string {
-			return "working"
-		}
-
-		if result := Componentify(renderer, struct{}{}).Render(1, 1); result != "working" {
-			t.Errorf("transformed value doesn't render correctly, expected \"working\", got \"%s\"", result)
-		}
-	})
-
-	t.Run("proplessRenderer", func(t *testing.T) {
-		proplessRenderer := func(int, int) string {
-			return "working"
-		}
-
-		if result := Componentify(proplessRenderer, struct{}{}).Render(1, 1); result != "working" {
-			t.Errorf("transformed value doesn't render correctly, expected \"working\", got \"%s\"", result)
-		}
-	})
-
-	t.Run("dumbRenderer", func(t *testing.T) {
-		dumbRenderer := func() string {
-			return "working"
-		}
-
-		if result := Componentify(dumbRenderer, struct{}{}).Render(1, 1); result != "working" {
-			t.Errorf("transformed value doesn't render correctly, expected \"working\", got \"%s\"", result)
-		}
-	})
-}
 
 func TestReactifyWidget(t *testing.T) {
 	input := textinput.New()
 	input.SetVirtualCursor(false)
 	input.Focus()
 
-	component := ReactifyWidget(input)
+	component := reactea.ReactifyWidget(input)
 
-	var _ Component = component
-	var _ Component = ReactifyWidget(viewport.New())
-	var _ Component = ReactifyWidget(textarea.New())
+	var (
+		_ reactea.Component = component
+		_ reactea.Component = reactea.ReactifyWidget(viewport.New())
+		_ reactea.Component = reactea.ReactifyWidget(textarea.New())
+	)
 
-	component.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	app := reactea.New(component, reactea.WithSize(20, 1))
+
+	app.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 
 	if got := component.Widget.Value(); got != "a" {
 		t.Fatalf("widget state was not stored back: %q", got)
 	}
 
-	view := tea.NewView(component.Render(20, 1))
+	view := app.View()
 
-	component.DecorateView(&view)
+	if !strings.Contains(view.Content, "a") {
+		t.Errorf("content = %q", view.Content)
+	}
 
 	if view.Cursor == nil {
-		t.Fatal("a focused textinput with the virtual cursor off reported no cursor")
+		t.Error("a focused textinput with the virtual cursor off reported no cursor")
 	}
 }
 
-// A widget that draws its own virtual cursor reports none, and the view is left
-// untouched.
+// A widget drawing its own virtual cursor reports none, and the view is clean.
 func TestReactifyWidgetVirtualCursor(t *testing.T) {
 	input := textinput.New()
 	input.Focus()
 
-	component := ReactifyWidget(input)
+	app := reactea.New(reactea.ReactifyWidget(input), reactea.WithSize(20, 1))
 
-	view := tea.NewView(component.Render(20, 1))
-
-	component.DecorateView(&view)
-
-	if view.Cursor != nil {
-		t.Errorf("cursor = %+v, want nil while the virtual cursor is on", view.Cursor)
+	if cursor := app.View().Cursor; cursor != nil {
+		t.Errorf("cursor = %+v, want nil while the virtual cursor is on", cursor)
 	}
 }
 
-// Widgets without Init() must not break the adapter.
+// The widget's cursor is reported in its own coordinates, so a parent that
+// insets it gets the translation for free.
+func TestReactifyWidgetCursorIsTranslated(t *testing.T) {
+	input := textinput.New()
+	input.SetVirtualCursor(false)
+	input.Focus()
+
+	widget := reactea.ReactifyWidget(input)
+
+	root := reactea.Func(func(ctx *reactea.Ctx) string {
+		return widget.Render(ctx.Inset(4, 2, 10, 1))
+	})
+
+	app := reactea.New(root, reactea.WithSize(20, 5))
+
+	cursor := app.View().Cursor
+
+	if cursor == nil {
+		t.Fatal("no cursor")
+	}
+
+	if cursor.Y != 2 || cursor.X < 4 {
+		t.Errorf("cursor = (%d, %d), want it offset by (4, 2)", cursor.X, cursor.Y)
+	}
+}
+
 func TestReactifyWidgetInitIsOptional(t *testing.T) {
-	if cmd := ReactifyWidget(textinput.New()).Init(); cmd != nil {
+	ctx := reactea.New(nil).Ctx()
+
+	if cmd := reactea.ReactifyWidget(textinput.New()).Init(ctx); cmd != nil {
 		t.Error("textinput has no Init, expected a nil cmd")
 	}
 
-	if cmd := ReactifyWidget(stopwatch.New()).Init(); cmd == nil {
+	if cmd := reactea.ReactifyWidget(stopwatch.New()).Init(ctx); cmd == nil {
 		t.Error("stopwatch has an Init, expected its cmd")
+	}
+}
+
+// A whole tea.Model nests through Reactify, cursor included.
+type nestedModel struct{ text string }
+
+func (m nestedModel) Init() tea.Cmd { return nil }
+
+func (m nestedModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		m.text += key.Text
+	}
+
+	return m, nil
+}
+
+func (m nestedModel) View() tea.View {
+	view := tea.NewView(m.text)
+	view.Cursor = tea.NewCursor(len(m.text), 0)
+
+	return view
+}
+
+func TestReactify(t *testing.T) {
+	component := reactea.Reactify[tea.Model](nestedModel{})
+
+	app := reactea.New(component, reactea.WithSize(10, 1))
+
+	app.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	app.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+
+	view := app.View()
+
+	if view.Content != "hi" {
+		t.Errorf("content = %q", view.Content)
+	}
+
+	if view.Cursor == nil || view.Cursor.X != 2 {
+		t.Errorf("cursor = %+v", view.Cursor)
 	}
 }

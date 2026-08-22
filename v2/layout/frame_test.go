@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/Hayao0819/reactea/v2"
 )
 
 func TestFramedShrinksTheChild(t *testing.T) {
@@ -12,15 +13,11 @@ func TestFramedShrinksTheChild(t *testing.T) {
 
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 2)
 
-	Framed(style, child).Render(30, 10)
+	reactea.New(Framed(style, child), reactea.WithSize(30, 10)).View()
 
 	// Border is 1 on each side, padding 1 vertical and 2 horizontal.
-	if child.width != 30-2-4 {
-		t.Errorf("child width = %d, want %d", child.width, 30-6)
-	}
-
-	if child.height != 10-2-2 {
-		t.Errorf("child height = %d, want %d", child.height, 10-4)
+	if child.width != 30-6 || child.height != 10-4 {
+		t.Errorf("child box = %dx%d, want %dx%d", child.width, child.height, 30-6, 10-4)
 	}
 }
 
@@ -29,50 +26,51 @@ func TestFramedShrinksTheChild(t *testing.T) {
 func TestFramedFillsItsBox(t *testing.T) {
 	framed := Framed(lipgloss.NewStyle().Border(lipgloss.NormalBorder()), &probe{label: "x"})
 
-	width, height := lipgloss.Size(framed.Render(24, 6))
+	content := reactea.New(framed, reactea.WithSize(24, 6)).View().Content
 
-	if width != 24 || height != 6 {
+	if width, height := lipgloss.Size(content); width != 24 || height != 6 {
 		t.Errorf("rendered %dx%d, want 24x6", width, height)
 	}
 }
 
 func TestFramedTranslatesCursor(t *testing.T) {
-	child := &probe{label: "x", cursor: tea.NewCursor(2, 1)}
+	child := &probe{label: "x", wantsCursor: true, cursorX: 2, cursorY: 1}
 
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 3)
 
-	framed := Framed(style, child)
-	framed.Render(30, 10)
+	app := reactea.New(Framed(style, child), reactea.WithSize(30, 10))
 
-	view := tea.NewView("")
+	app.View()
 
-	framed.DecorateView(&view)
+	cursor := app.Ctx().View().Cursor
 
-	if view.Cursor == nil {
-		t.Fatal("the child cursor did not reach the frame")
+	if cursor == nil {
+		t.Fatal("the child cursor did not reach the app")
 	}
 
 	// left border 1 + left padding 3, top border 1 + top padding 1.
-	if view.Cursor.X != 2+4 || view.Cursor.Y != 1+2 {
-		t.Errorf("cursor = (%d, %d), want (6, 3)", view.Cursor.X, view.Cursor.Y)
+	if cursor.X != 2+4 || cursor.Y != 1+2 {
+		t.Errorf("cursor = (%d, %d), want (6, 3)", cursor.X, cursor.Y)
 	}
 }
 
 // A frame inside a box has to stack both offsets.
 func TestFramedInsideColumn(t *testing.T) {
-	child := &probe{label: "x", cursor: tea.NewCursor(0, 0)}
+	child := &probe{label: "x", wantsCursor: true}
 
 	framed := Framed(lipgloss.NewStyle().Border(lipgloss.NormalBorder()), child)
 
-	box := Column(Fixed(2, &probe{label: "h"}), Grow(1, framed))
-	box.Render(20, 10)
+	app := reactea.New(
+		Column(Fixed(2, &probe{label: "h"}), Grow(1, framed)),
+		reactea.WithSize(20, 10),
+	)
 
-	view := tea.NewView("")
+	app.View()
 
-	box.DecorateView(&view)
+	cursor := app.Ctx().View().Cursor
 
-	if view.Cursor.X != 1 || view.Cursor.Y != 3 {
-		t.Errorf("cursor = (%d, %d), want (1, 3)", view.Cursor.X, view.Cursor.Y)
+	if cursor.X != 1 || cursor.Y != 3 {
+		t.Errorf("cursor = (%d, %d), want (1, 3)", cursor.X, cursor.Y)
 	}
 }
 
@@ -81,7 +79,7 @@ func TestFramedSmallerThanItsFrame(t *testing.T) {
 
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(2)
 
-	Framed(style, child).Render(2, 2)
+	reactea.New(Framed(style, child), reactea.WithSize(2, 2)).View()
 
 	if child.width != 0 || child.height != 0 {
 		t.Errorf("child size = %dx%d, want 0x0", child.width, child.height)
@@ -93,8 +91,10 @@ func TestFramedForwardsLifecycle(t *testing.T) {
 
 	framed := Framed(lipgloss.NewStyle(), child)
 
-	framed.Init()
-	framed.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	app := reactea.New(framed, reactea.WithSize(10, 4))
+
+	app.Init()
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	framed.Destroy()
 
 	if !child.inited || child.updates != 1 || !child.destroyed {

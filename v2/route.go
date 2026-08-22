@@ -1,157 +1,60 @@
 package reactea
 
-import (
-	"strings"
-	"sync"
+import "strings"
 
-	tea "charm.land/bubbletea/v2"
-)
-
-type RouteUpdatedMsg struct {
-	Original string
-}
-
-// Global Route object, substitute of window.location
-// Feel free to use standard path package
-//
-// stateMu guards these and isUpdate. Reactea runs every tea.Cmd on its own
-// goroutine, so a command reading the route races the event loop writing it
-// unless both go through here.
-var (
-	stateMu         sync.RWMutex
-	currentRoute    = "/"
-	lastRoute       = "/"
-	wasRouteChanged = false
-)
-
-func CurrentRoute() string {
-	stateMu.RLock()
-	defer stateMu.RUnlock()
-
-	return currentRoute
-}
-
-func LastRoute() string {
-	stateMu.RLock()
-	defer stateMu.RUnlock()
-
-	return lastRoute
-}
-
-func WasRouteChanged() bool {
-	stateMu.RLock()
-	defer stateMu.RUnlock()
-
-	return wasRouteChanged
-}
-
-func SetRoute(target string) tea.Cmd {
-	stateMu.Lock()
-	defer stateMu.Unlock()
-
-	if !isUpdate {
-		panic("tried updating global route not in update")
+// Resolve turns target into an absolute route. An absolute target is returned
+// as is; a relative one is applied to base, honouring "." and "..".
+func Resolve(base, target string) string {
+	if target == "" {
+		return base
 	}
 
-	if len(target) == 0 || target[0] != '/' {
-		panic("can't set route to non-root path")
+	var levels []string
+
+	if target[0] != '/' {
+		levels = split(base)
 	}
 
-	// lastRoute captures the route as it was at the start of this Update
-	// (before the first change), so it survives multiple SetRoute calls.
-	if !wasRouteChanged {
-		lastRoute = currentRoute
-	}
-
-	currentRoute = target
-
-	// Derive the change flag from the net result rather than latching on the
-	// first change, so a change-then-revert within one Update (e.g.
-	// SetRoute("/a") then SetRoute("/")) does not trigger a spurious re-route.
-	wasRouteChanged = currentRoute != lastRoute
-	return nil
-}
-
-func beginUpdate() {
-	stateMu.Lock()
-	defer stateMu.Unlock()
-
-	wasRouteChanged = false
-	isUpdate = true
-}
-
-// endUpdate closes the update stage and reports the route as it was before the
-// stage, plus whether it ended up changed.
-func endUpdate() (string, bool) {
-	stateMu.Lock()
-	defer stateMu.Unlock()
-
-	isUpdate = false
-
-	return lastRoute, wasRouteChanged
-}
-
-func resetRouteState() {
-	stateMu.Lock()
-	defer stateMu.Unlock()
-
-	isUpdate = false
-	currentRoute = "/"
-	lastRoute = "/"
-	wasRouteChanged = false
-}
-
-func Navigate(target string) tea.Cmd {
-	var currentRouteLevels []string
-
-	if len(target) == 0 {
-		// Just don't navigate if no target was given
-		return nil
-	}
-
-	// Check whether target is absolute
-	if target[0] == '/' {
-		currentRouteLevels = []string{}
-	} else {
-		// Strip the leading empty element (from the leading '/') and any
-		// trailing empty element. Guard the slice so a malformed currentRoute
-		// (e.g. one without a leading '/') can't trigger an out-of-range panic.
-		levels := strings.Split(CurrentRoute(), "/")
-		if len(levels) >= 2 {
-			currentRouteLevels = levels[1 : len(levels)-1]
-		} else {
-			currentRouteLevels = []string{}
-		}
-	}
-
-	for _, targetLevel := range strings.Split(target, "/") {
-		switch targetLevel {
-		case ".", "":
+	for _, level := range strings.Split(target, "/") {
+		switch level {
+		case "", ".":
 		case "..":
-			if len(currentRouteLevels) > 0 {
-				currentRouteLevels = currentRouteLevels[:len(currentRouteLevels)-1]
+			if len(levels) > 0 {
+				levels = levels[:len(levels)-1]
 			}
 		default:
-			currentRouteLevels = append(currentRouteLevels, targetLevel)
+			levels = append(levels, level)
 		}
 	}
 
-	return SetRoute("/" + strings.Join(currentRouteLevels, "/"))
+	return "/" + strings.Join(levels, "/")
 }
 
-// Checks whether route (e.g. /teams/123/12) matches
-// placeholder (e.g /teams/:teamId/:playerId)
-// Returns map of found params and if it matches
-// Params have to follow regex ^:.*$
-// ^ being beginning of current path level (/^level/)
-// $ being end of current path level (/level$/)
+func split(route string) []string {
+	levels := make([]string, 0, strings.Count(route, "/"))
+
+	for _, level := range strings.Split(route, "/") {
+		if level != "" {
+			levels = append(levels, level)
+		}
+	}
+
+	return levels
+}
+
+// MatchRoute reports whether route (e.g. /teams/123/12) matches placeholder
+// (e.g. /teams/:teamId/:playerId) and returns the params it captured.
 //
-// Note: Entire matched route can be accessed with key "$"
-// Note: Placeholders can be optional => /foo/?:/?: will match foo/bar and foo and /foo/bar/baz
-// Note: The most outside placeholders can be optional recursive => /foo/+?: will match /foo/bar and foo and /foo/bar/baz
-// Note: It allows for defining wildcards with /foo/:/bar
-// Note: Duplicate params will result in overwrite of first param
-func RouteMatchesPlaceholder(route string, placeholder string) (map[string]string, bool) {
+// Params follow ^:.*$, where ^ is the start of a path level and $ its end.
+//
+//   - The whole matched route is available under the key "$".
+//   - Placeholders can be optional: /foo/?:/?: matches /foo, /foo/bar and
+//     /foo/bar/baz.
+//   - A trailing placeholder can be an optional catch-all: /foo/+?: matches
+//     /foo and everything below it.
+//   - Wildcards are allowed: /foo/:/bar.
+//   - A repeated param name keeps the value of its last occurrence.
+func MatchRoute(route string, placeholder string) (map[string]string, bool) {
 	var (
 		routeLevels       = strings.Split(route, "/")
 		placeholderLevels = strings.Split(placeholder, "/")
@@ -160,14 +63,13 @@ func RouteMatchesPlaceholder(route string, placeholder string) (map[string]strin
 	if len(route) > 0 && route[0] == '/' {
 		routeLevels = routeLevels[1:]
 	} else {
-		// Checking against non-root route is forbidden
+		// Checking against a non-root route is forbidden.
 		return nil, false
 	}
 
 	if len(placeholder) > 0 && placeholder[0] == '/' {
 		placeholderLevels = placeholderLevels[1:]
 	} else {
-		// Checking against non-root placeholder is forbidden
 		return nil, false
 	}
 
@@ -181,53 +83,48 @@ func RouteMatchesPlaceholder(route string, placeholder string) (map[string]strin
 
 	for i, placeholderLevel := range placeholderLevels {
 		if i > len(routeLevels)-1 {
-			if strings.HasPrefix(placeholderLevel, "?:") {
-				if placeholderLevel == "?:" {
-					continue // wildcard
+			switch {
+			case strings.HasPrefix(placeholderLevel, "+?:"):
+				if placeholderLevel != "+?:" {
+					params[placeholderLevel[3:]] = ""
 				}
 
-				paramName := placeholderLevel[2:]
-				params[paramName] = ""
+				return params, true
+
+			case strings.HasPrefix(placeholderLevel, "?:"):
+				if placeholderLevel != "?:" {
+					params[placeholderLevel[2:]] = ""
+				}
+
 				continue
-			} else if strings.HasPrefix(placeholderLevel, "+?:") {
-				if placeholderLevel == "+?:" {
-					break
-				}
 
-				paramName := placeholderLevel[3:]
-				params[paramName] = ""
-				break
-			} else {
-				// We are out of bounds and placeholder doesn't want optional data
+			default:
+				// Out of bounds and the placeholder does not want optional data.
 				return nil, false
 			}
 		}
 
 		routeLevel := routeLevels[i]
 
-		if strings.HasPrefix(placeholderLevel, ":") {
-			if placeholderLevel == ":" {
-				continue // wildcard
+		switch {
+		case strings.HasPrefix(placeholderLevel, "+?:"):
+			if placeholderLevel != "+?:" {
+				params[placeholderLevel[3:]] = strings.Join(routeLevels[i:], "/")
 			}
 
-			paramName := placeholderLevel[1:]
-			params[paramName] = routeLevel
-		} else if strings.HasPrefix(placeholderLevel, "?:") {
-			if placeholderLevel == "?:" {
-				continue // wildcard
+			return params, true
+
+		case strings.HasPrefix(placeholderLevel, "?:"):
+			if placeholderLevel != "?:" {
+				params[placeholderLevel[2:]] = routeLevel
 			}
 
-			paramName := placeholderLevel[2:]
-			params[paramName] = routeLevel
-		} else if strings.HasPrefix(placeholderLevel, "+?:") {
-			if placeholderLevel == "+?:" {
-				break
+		case strings.HasPrefix(placeholderLevel, ":"):
+			if placeholderLevel != ":" {
+				params[placeholderLevel[1:]] = routeLevel
 			}
 
-			paramName := placeholderLevel[3:]
-			params[paramName] = strings.Join(routeLevels[i:], "/")
-			break
-		} else {
+		default:
 			if routeLevel != placeholderLevel {
 				return nil, false
 			}
@@ -235,13 +132,4 @@ func RouteMatchesPlaceholder(route string, placeholder string) (map[string]strin
 	}
 
 	return params, true
-}
-
-// It might be important to do so in some scenarios.
-// Basically causes rerender so ALL components are
-// aware of changed routes
-func updatedRoute(original string) tea.Cmd {
-	return func() tea.Msg {
-		return RouteUpdatedMsg{original}
-	}
 }

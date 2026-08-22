@@ -1,6 +1,5 @@
 // Package layout splits a box among child components the way a single-axis
-// flexbox does, so a parent no longer computes child sizes or cursor offsets by
-// hand.
+// flexbox does, so a parent no longer computes child sizes or cursor offsets.
 package layout
 
 import (
@@ -39,21 +38,15 @@ func Grow(weight int, component reactea.Component) Item {
 }
 
 // Bounded is Grow with a floor and a ceiling. A zero max means unbounded.
-func Bounded(weight, min, max int, component reactea.Component) Item {
-	return Item{Component: component, Grow: weight, Min: min, Max: max}
+func Bounded(weight, minimum, maximum int, component reactea.Component) Item {
+	return Item{Component: component, Grow: weight, Min: minimum, Max: maximum}
 }
 
 // Box lays its items out along one axis and gives each the full cross axis.
 type Box struct {
 	direction Direction
 	items     []Item
-
-	// offsets are where the last Render placed each item, which is what makes
-	// automatic cursor translation possible.
-	offsets []offset
 }
-
-type offset struct{ x, y int }
 
 func New(direction Direction, items ...Item) *Box {
 	return &Box{direction: direction, items: items}
@@ -65,20 +58,22 @@ func Column(items ...Item) *Box { return New(Vertical, items...) }
 // Row places items left to right.
 func Row(items ...Item) *Box { return New(Horizontal, items...) }
 
-func (b *Box) Init() tea.Cmd {
+func (b *Box) Init(ctx *reactea.Ctx) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(b.items))
-	for _, item := range b.items {
-		cmds = append(cmds, item.Component.Init())
-	}
+
+	b.each(ctx, func(item Item, childCtx *reactea.Ctx) {
+		cmds = append(cmds, item.Component.Init(childCtx))
+	})
 
 	return tea.Batch(cmds...)
 }
 
-func (b *Box) Update(msg tea.Msg) tea.Cmd {
+func (b *Box) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(b.items))
-	for _, item := range b.items {
-		cmds = append(cmds, item.Component.Update(msg))
-	}
+
+	b.each(ctx, func(item Item, childCtx *reactea.Ctx) {
+		cmds = append(cmds, item.Component.Update(childCtx, msg))
+	})
 
 	return tea.Batch(cmds...)
 }
@@ -89,30 +84,12 @@ func (b *Box) Destroy() {
 	}
 }
 
-func (b *Box) Render(width, height int) string {
-	main, cross := width, height
-	if b.direction == Vertical {
-		main, cross = height, width
-	}
-
-	sizes := distribute(main, b.items)
-
+func (b *Box) Render(ctx *reactea.Ctx) string {
 	rendered := make([]string, 0, len(b.items))
-	b.offsets = make([]offset, len(b.items))
 
-	position := 0
-
-	for i, item := range b.items {
-		if b.direction == Vertical {
-			b.offsets[i] = offset{x: 0, y: position}
-			rendered = append(rendered, item.Component.Render(cross, sizes[i]))
-		} else {
-			b.offsets[i] = offset{x: position, y: 0}
-			rendered = append(rendered, item.Component.Render(sizes[i], cross))
-		}
-
-		position += sizes[i]
-	}
+	b.each(ctx, func(item Item, childCtx *reactea.Ctx) {
+		rendered = append(rendered, item.Component.Render(childCtx))
+	})
 
 	if b.direction == Vertical {
 		return lipgloss.JoinVertical(lipgloss.Left, rendered...)
@@ -121,58 +98,29 @@ func (b *Box) Render(width, height int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-// DecorateView collects each child's decoration, translating any cursor by the
-// offset the last Render placed that child at. Later items win on the scalar
-// fields; a cursor is taken from the last item that asked for one.
-func (b *Box) DecorateView(view *tea.View) {
+// each computes the split and hands every item the box it was given. The split
+// is recomputed per phase rather than cached from Render, so Update and Render
+// can be called in any order.
+func (b *Box) each(ctx *reactea.Ctx, visit func(Item, *reactea.Ctx)) {
+	width, height := ctx.Size()
+
+	main, cross := width, height
+	if b.direction == Vertical {
+		main, cross = height, width
+	}
+
+	sizes := distribute(main, b.items)
+
+	position := 0
+
 	for i, item := range b.items {
-		child := tea.NewView("")
-
-		reactea.DecorateView(item.Component, &child)
-
-		if i < len(b.offsets) {
-			reactea.TranslateCursor(&child, b.offsets[i].x, b.offsets[i].y)
+		if b.direction == Vertical {
+			visit(item, ctx.Inset(0, position, cross, sizes[i]))
+		} else {
+			visit(item, ctx.Inset(position, 0, sizes[i], cross))
 		}
 
-		merge(view, child)
-	}
-}
-
-func merge(into *tea.View, from tea.View) {
-	if from.Cursor != nil {
-		into.Cursor = from.Cursor
-	}
-
-	if from.AltScreen {
-		into.AltScreen = true
-	}
-
-	if from.ReportFocus {
-		into.ReportFocus = true
-	}
-
-	if from.DisableBracketedPasteMode {
-		into.DisableBracketedPasteMode = true
-	}
-
-	if from.WindowTitle != "" {
-		into.WindowTitle = from.WindowTitle
-	}
-
-	if from.MouseMode != 0 {
-		into.MouseMode = from.MouseMode
-	}
-
-	if from.BackgroundColor != nil {
-		into.BackgroundColor = from.BackgroundColor
-	}
-
-	if from.ForegroundColor != nil {
-		into.ForegroundColor = from.ForegroundColor
-	}
-
-	if from.ProgressBar != nil {
-		into.ProgressBar = from.ProgressBar
+		position += sizes[i]
 	}
 }
 
@@ -189,6 +137,8 @@ func distribute(total int, items []Item) []int {
 	remaining := total
 	weight := 0
 
+	grow := make([]int, len(items))
+
 	for i, item := range items {
 		if item.Size > 0 {
 			sizes[i] = min(item.Size, remaining)
@@ -198,24 +148,21 @@ func distribute(total int, items []Item) []int {
 		}
 
 		// A flexible item with no weight still deserves a share.
-		if item.Grow <= 0 {
-			items[i].Grow = 1
-		}
-
-		weight += items[i].Grow
+		grow[i] = max(item.Grow, 1)
+		weight += grow[i]
 	}
 
 	if weight == 0 {
 		return sizes
 	}
 
-	share(sizes, items, remaining, weight)
-	clamp(sizes, items, total)
+	share(sizes, items, grow, remaining, weight)
+	clampSizes(sizes, items, total)
 
 	return sizes
 }
 
-func share(sizes []int, items []Item, remaining, weight int) {
+func share(sizes []int, items []Item, grow []int, remaining, weight int) {
 	// Largest-remainder apportionment: hand out the floor of each share, then
 	// give the leftover cells to the items with the biggest fractional part, so
 	// the sizes always add up to remaining.
@@ -227,7 +174,7 @@ func share(sizes []int, items []Item, remaining, weight int) {
 			continue
 		}
 
-		exact := remaining * item.Grow
+		exact := remaining * grow[i]
 		sizes[i] = exact / weight
 		fractions[i] = exact % weight
 		leftover -= sizes[i]
@@ -255,7 +202,7 @@ func share(sizes []int, items []Item, remaining, weight int) {
 	}
 }
 
-func clamp(sizes []int, items []Item, total int) {
+func clampSizes(sizes []int, items []Item, total int) {
 	free := make([]int, 0, len(items))
 	used := 0
 
@@ -295,9 +242,7 @@ func clamp(sizes []int, items []Item, total int) {
 		}
 	}
 
-	for used < total && len(free) > 0 {
+	if used < total && len(free) > 0 {
 		sizes[free[0]] += total - used
-
-		return
 	}
 }

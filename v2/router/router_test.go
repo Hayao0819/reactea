@@ -1,418 +1,196 @@
-package router
+package router_test
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/Hayao0819/reactea/v2"
+	"github.com/Hayao0819/reactea/v2/router"
 )
 
-type testComponenent struct {
+type page struct {
 	reactea.BasicComponent
 
-	router *Component
-
-	testUpdater func(*testComponenent) tea.Cmd
-
-	updateN int
-
-	// rendered holds the most recent Render output. v2's renderer emits ANSI
-	// diff sequences to a buffer, so we observe the routed component's output
-	// here instead of scraping the terminal bytes.
-	rendered string
+	label     string
+	destroyed bool
 }
 
-func (c *testComponenent) Init() tea.Cmd {
-	return c.router.Init()
-}
+func (c *page) Render(*reactea.Ctx) string { return c.label }
+func (c *page) Destroy()                   { c.destroyed = true }
 
-func (c *testComponenent) Update(msg tea.Msg) tea.Cmd {
-	defer func() {
-		c.updateN++
-	}()
+func pages(labels map[string]string) router.Routes {
+	routes := router.Routes{}
 
-	if c.testUpdater != nil {
-		return tea.Batch(c.router.Update(c.router.Update(msg)), c.testUpdater(c))
+	for placeholder, label := range labels {
+		routes[placeholder] = func(router.Params) reactea.Component {
+			return &page{label: label}
+		}
 	}
 
-	return tea.Batch(c.router.Update(msg), reactea.Destroy)
+	return routes
 }
 
-func (c *testComponenent) Render(width, height int) string {
-	c.rendered = c.router.Render(width, height)
-	return c.rendered
+func render(t *testing.T, routes router.Routes, route string) (string, *reactea.App) {
+	t.Helper()
+
+	component := router.NewWithRoutes(routes)
+
+	app := reactea.New(component, reactea.WithRoute(route), reactea.WithSize(20, 5))
+
+	app.Init()
+
+	return app.View().Content, app
 }
 
-func TestDefault(t *testing.T) {
-	var in, out bytes.Buffer
+func TestRoutesToTheMatchingPage(t *testing.T) {
+	content, _ := render(t, pages(map[string]string{
+		"default":    "DEFAULT",
+		"/test/test": "TESTS",
+	}), "/test/test")
 
-	in.WriteString("123")
-
-	root := &testComponenent{
-		router: NewWithRoutes(map[string]RouteInitializer{
-			"default": func(Params) reactea.Component {
-				renderer := func() string {
-					return "Hello Default!"
-				}
-
-				return reactea.ComponentifyDumb(renderer)
-			},
-		}),
-	}
-
-	program := reactea.NewProgram(root, tea.WithInput(&in), tea.WithOutput(&out))
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if !strings.Contains(root.rendered, "Hello Default!") {
-		t.Fatalf("no default route message")
+	if !strings.Contains(content, "TESTS") {
+		t.Errorf("content = %q", content)
 	}
 }
 
-func TestNonDefault(t *testing.T) {
-	var in, out bytes.Buffer
+func TestFallsBackToDefault(t *testing.T) {
+	content, _ := render(t, pages(map[string]string{"default": "DEFAULT"}), "/nowhere")
 
-	in.WriteString("123")
-
-	root := &testComponenent{
-		router: NewWithRoutes(map[string]RouteInitializer{
-			"default": func(Params) reactea.Component {
-				renderer := func() string {
-					return "Hello Default!"
-				}
-
-				return reactea.ComponentifyDumb(renderer)
-			},
-			"/test/test": func(Params) reactea.Component {
-				renderer := func() string {
-					return "Hello Tests!"
-				}
-
-				return reactea.ComponentifyDumb(renderer)
-			},
-		}),
-	}
-
-	program := reactea.NewProgram(root, reactea.WithRoute("/test/test"), tea.WithInput(&in), tea.WithOutput(&out))
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if strings.Contains(root.rendered, "Hello Default!") {
-		t.Fatalf("got default route message")
-	}
-
-	if !strings.Contains(root.rendered, "Hello Tests!") {
-		t.Fatalf("got invalid route message")
-	}
-}
-
-func TestRouteChange(t *testing.T) {
-	var in, out bytes.Buffer
-
-	in.WriteString("123")
-
-	root := &testComponenent{
-		testUpdater: func(c *testComponenent) tea.Cmd {
-			if c.updateN == 0 {
-				reactea.SetRoute("/test/test")
-
-				return nil
-			} else {
-				return reactea.Destroy
-			}
-		},
-		router: NewWithRoutes(map[string]RouteInitializer{
-			"default": func(Params) reactea.Component {
-				renderer := func() string {
-					return "Hello Default!"
-				}
-
-				return reactea.ComponentifyDumb(renderer)
-			},
-			"/test/test": func(Params) reactea.Component {
-				renderer := func() string {
-					return "Hello Tests!"
-				}
-
-				return reactea.ComponentifyDumb(renderer)
-			},
-		}),
-	}
-
-	program := reactea.NewProgram(root, tea.WithInput(&in), tea.WithOutput(&out))
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if strings.Contains(root.rendered, "Hello Default!") {
-		t.Fatalf("got default route message")
-	}
-
-	if !strings.Contains(root.rendered, "Hello Tests!") {
-		t.Fatalf("got invalid route message")
+	if !strings.Contains(content, "DEFAULT") {
+		t.Errorf("content = %q", content)
 	}
 }
 
 func TestNotFound(t *testing.T) {
-	var in, out bytes.Buffer
+	content, _ := render(t, pages(map[string]string{"/known": "KNOWN"}), "/unknown")
 
-	in.WriteString("123")
-
-	root := &testComponenent{
-		router: New(),
-	}
-
-	program := reactea.NewProgram(root, tea.WithInput(&in), tea.WithOutput(&out))
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if !strings.Contains(root.rendered, "Couldn't route for") {
-		t.Fatalf("got invalid route message")
+	if !strings.Contains(content, `Couldn't route for "/unknown"`) {
+		t.Errorf("content = %q", content)
 	}
 }
 
-func TestRouteWithParam(t *testing.T) {
-	var in, out bytes.Buffer
+func TestNotFoundIsOverridable(t *testing.T) {
+	component := router.NewWithRoutes(pages(map[string]string{"/known": "KNOWN"}))
+	component.NotFound = func(ctx *reactea.Ctx) string {
+		return "no page at " + ctx.Route()
+	}
 
-	in.WriteString("123")
+	app := reactea.New(component, reactea.WithRoute("/unknown"), reactea.WithSize(20, 5))
 
-	root := &testComponenent{
-		testUpdater: func(c *testComponenent) tea.Cmd {
-			if c.updateN == 0 {
-				reactea.SetRoute("/test/wellDone")
+	app.Init()
 
-				return nil
-			} else {
-				return reactea.Destroy
-			}
+	if got := app.View().Content; !strings.Contains(got, "no page at /unknown") {
+		t.Errorf("content = %q", got)
+	}
+}
+
+func TestParamsReachThePage(t *testing.T) {
+	routes := router.Routes{
+		"/team/:id": func(params router.Params) reactea.Component {
+			return &page{label: fmt.Sprintf("team %s", params["id"])}
 		},
-		router: NewWithRoutes(map[string]RouteInitializer{
-			"default": func(Params) reactea.Component {
-				renderer := func() string {
-					return "Hello Default!"
-				}
-
-				return reactea.ComponentifyDumb(renderer)
-			},
-			"/test/:foo": func(params Params) reactea.Component {
-				renderer := func() string {
-					return fmt.Sprintf("Hello Tests! Param foo is %s", params["foo"])
-				}
-
-				return reactea.ComponentifyDumb(renderer)
-			},
-		}),
 	}
 
-	program := reactea.NewProgram(root, tea.WithInput(&in), tea.WithOutput(&out))
+	content, _ := render(t, routes, "/team/42")
 
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if strings.Contains(root.rendered, "Hello Default!") {
-		t.Fatalf("got default route message")
-	}
-
-	if !strings.Contains(root.rendered, "Hello Tests!") {
-		t.Fatalf("got invalid route message")
-	}
-
-	if !strings.Contains(root.rendered, "Hello Tests! Param foo is wellDone") {
-		t.Fatalf("got valid route message, but most likely wrong param")
+	if !strings.Contains(content, "team 42") {
+		t.Errorf("content = %q", content)
 	}
 }
 
-// When more than one placeholder matches, the most specific (literal over
-// param) must win, deterministically across runs — not be picked at random by
-// Go's map iteration order.
-func TestRouteSpecificity(t *testing.T) {
-	for i := 0; i < 50; i++ {
-		var in, out bytes.Buffer
-
-		in.WriteString("123")
-
-		root := &testComponenent{
-			router: NewWithRoutes(map[string]RouteInitializer{
-				"/user/:id": func(Params) reactea.Component {
-					return reactea.ComponentifyDumb(func() string { return "PARAM" })
-				},
-				"/user/settings": func(Params) reactea.Component {
-					return reactea.ComponentifyDumb(func() string { return "EXACT" })
-				},
-			}),
-		}
-
-		program := reactea.NewProgram(root, reactea.WithRoute("/user/settings"), tea.WithInput(&in), tea.WithOutput(&out))
-
-		if _, err := program.Run(); err != nil {
-			t.Fatal(err)
-		}
-
-		if !strings.Contains(root.rendered, "EXACT") {
-			t.Fatalf("iteration %d: expected the exact route to win, got %q", i, root.rendered)
-		}
-
-		if strings.Contains(root.rendered, "PARAM") {
-			t.Fatalf("iteration %d: param route was selected over the exact one, got %q", i, root.rendered)
-		}
-	}
-}
-
-// Specificity precedence: literal > param (":") > optional ("?:") > catch-all
-// ("+?:"); more segments beat fewer on an equal prefix; equal specificity is
-// broken deterministically by placeholder string.
-func TestRouteSpecificityRanking(t *testing.T) {
-	cases := []struct {
-		a, b string
-		want bool // moreSpecific(a, b)
-	}{
-		{"/user/settings", "/user/:id", true}, // literal over param
-		{"/user/:id", "/user/settings", false},
-		{"/a/:x", "/a/?:x", true},   // param over optional
-		{"/a/?:x", "/a/+?:x", true}, // optional over catch-all
-		{"/a/b/c", "/a/b", true},    // more segments win
-		{"/a/b", "/a/b/c", false},
-		{"/a", "/b", true}, // tie broken by string order
-		{"/b", "/a", false},
-	}
-
-	for _, tc := range cases {
-		if got := moreSpecific(tc.a, tc.b); got != tc.want {
-			t.Errorf("moreSpecific(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
-		}
-	}
-}
-
-// A re-route to an unmatched path (with no "default") must Destroy the current
-// component and fall back to the "Couldn't route" render, not keep rendering
-// the destroyed component.
-func TestFailedRerouteFallsBack(t *testing.T) {
-	var in, out bytes.Buffer
-
-	in.WriteString("123")
-
-	root := &testComponenent{
-		testUpdater: func(c *testComponenent) tea.Cmd {
-			if c.updateN == 0 {
-				reactea.SetRoute("/nowhere")
-
-				return nil
-			}
-
-			return reactea.Destroy
-		},
-		router: NewWithRoutes(map[string]RouteInitializer{
-			"/start": func(Params) reactea.Component {
-				return reactea.ComponentifyDumb(func() string { return "STARTED" })
-			},
-		}),
-	}
-
-	program := reactea.NewProgram(root, reactea.WithRoute("/start"), tea.WithInput(&in), tea.WithOutput(&out))
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if !strings.Contains(root.rendered, "Couldn't route for \"/nowhere\"") {
-		t.Fatalf("expected fallback render after a failed re-route, got %q", root.rendered)
-	}
-}
-
-type destroyTrackingComponent struct {
-	reactea.BasicComponent
-
-	destroyed *bool
-}
-
-func (c *destroyTrackingComponent) Render(int, int) string { return "PAGE" }
-func (c *destroyTrackingComponent) Destroy()               { *c.destroyed = true }
-
-// A root component the way an app would write one: it owns a router and hands
-// every lifecycle method down to it.
-type destroyForwardingComponent struct {
-	router *Component
-}
-
-func (c *destroyForwardingComponent) Init() tea.Cmd { return c.router.Init() }
-func (c *destroyForwardingComponent) Destroy()      { c.router.Destroy() }
-
-func (c *destroyForwardingComponent) Update(msg tea.Msg) tea.Cmd {
-	return tea.Batch(c.router.Update(msg), reactea.Destroy)
-}
-
-func (c *destroyForwardingComponent) Render(width, height int) string {
-	return c.router.Render(width, height)
-}
-
-// Tearing the app down has to reach the routed component too, not stop at the
-// router.
-func TestDestroyReachesRoutedComponent(t *testing.T) {
-	var in, out bytes.Buffer
-
-	in.WriteString("123")
-
-	destroyed := false
-
-	router := NewWithRoutes(map[string]RouteInitializer{
-		"default": func(Params) reactea.Component {
-			return &destroyTrackingComponent{destroyed: &destroyed}
-		},
+// When several placeholders match, the most specific one has to win on every
+// run — not be picked at random by Go's map iteration order.
+func TestSpecificityIsDeterministic(t *testing.T) {
+	routes := pages(map[string]string{
+		"/user/:id":      "PARAM",
+		"/user/settings": "EXACT",
 	})
 
-	root := &destroyForwardingComponent{router: router}
+	for i := range 50 {
+		content, _ := render(t, routes, "/user/settings")
 
-	program := reactea.NewProgram(root, tea.WithInput(&in), tea.WithOutput(&out))
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if !destroyed {
-		t.Fatal("routed component was not destroyed on teardown")
+		if !strings.Contains(content, "EXACT") {
+			t.Fatalf("iteration %d: content = %q", i, content)
+		}
 	}
 }
 
-type decoratingPage struct {
+func TestRouteChangeSwapsThePage(t *testing.T) {
+	routes := pages(map[string]string{"/a": "A", "/b": "B"})
+
+	component := router.NewWithRoutes(routes)
+
+	app := reactea.New(component, reactea.WithRoute("/a"), reactea.WithSize(20, 5))
+
+	app.Init()
+
+	first := component.Current()
+
+	if got := app.View().Content; !strings.Contains(got, "A") {
+		t.Fatalf("content = %q", got)
+	}
+
+	_, cmd := app.Update(app.Ctx().SetRoute("/b")())
+	app.Update(cmd())
+
+	if got := app.View().Content; !strings.Contains(got, "B") {
+		t.Errorf("content = %q", got)
+	}
+
+	if !first.(*page).destroyed {
+		t.Error("the replaced page was not destroyed")
+	}
+}
+
+func TestDestroyReachesTheRoutedPage(t *testing.T) {
+	component := router.NewWithRoutes(pages(map[string]string{"default": "PAGE"}))
+
+	app := reactea.New(component, reactea.WithSize(20, 5))
+
+	app.Init()
+
+	current := component.Current()
+
+	component.Destroy()
+
+	if !current.(*page).destroyed {
+		t.Error("Destroy did not reach the routed page")
+	}
+}
+
+func TestMessagesReachTheRoutedPage(t *testing.T) {
+	var seen int
+
+	routes := router.Routes{
+		"default": func(router.Params) reactea.Component {
+			return &countingPage{seen: &seen}
+		},
+	}
+
+	component := router.NewWithRoutes(routes)
+
+	app := reactea.New(component, reactea.WithSize(20, 5))
+
+	app.Init()
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+
+	if seen != 1 {
+		t.Errorf("the page saw %d messages, want 1", seen)
+	}
+}
+
+type countingPage struct {
 	reactea.BasicComponent
+
+	seen *int
 }
 
-func (c *decoratingPage) Render(int, int) string { return "PAGE" }
+func (c *countingPage) Render(*reactea.Ctx) string { return "" }
 
-func (c *decoratingPage) DecorateView(view *tea.View) {
-	view.WindowTitle = "page"
-	view.Cursor = tea.NewCursor(2, 3)
-}
+func (c *countingPage) Update(*reactea.Ctx, tea.Msg) tea.Cmd {
+	*c.seen++
 
-// The router has to pass the view down to the routed component, otherwise a
-// page could never place the cursor or set a window title.
-func TestDecorateViewReachesRoutedComponent(t *testing.T) {
-	router := NewWithRoutes(map[string]RouteInitializer{
-		"default": func(Params) reactea.Component { return &decoratingPage{} },
-	})
-
-	router.Init()
-
-	view := tea.NewView("")
-
-	router.DecorateView(&view)
-
-	if view.WindowTitle != "page" {
-		t.Errorf("WindowTitle = %q", view.WindowTitle)
-	}
-
-	if view.Cursor == nil || view.Cursor.X != 2 || view.Cursor.Y != 3 {
-		t.Errorf("Cursor = %+v", view.Cursor)
-	}
+	return nil
 }

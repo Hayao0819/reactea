@@ -1,3 +1,4 @@
+// Package router picks a child component from the app's current route.
 package router
 
 import (
@@ -9,103 +10,98 @@ import (
 )
 
 type Params = map[string]string
+
 type RouteInitializer func(Params) reactea.Component
+
 type Routes = map[string]RouteInitializer
 
+// Component renders whichever route matches, re-initialising when the route
+// changes and destroying the page it replaces.
 type Component struct {
-	reactea.BasicComponent
-
 	Routes Routes
 
-	currentComponent reactea.Component
+	// NotFound renders when nothing matched and there is no "default" route.
+	NotFound reactea.RenderFunc
+
+	current reactea.Component
+	route   string
 }
 
-func New() *Component {
-	return &Component{}
+func New() *Component { return &Component{} }
+
+func NewWithRoutes(routes Routes) *Component { return &Component{Routes: routes} }
+
+// Current is the routed component, or nil when nothing matched.
+func (c *Component) Current() reactea.Component { return c.current }
+
+func (c *Component) Init(ctx *reactea.Ctx) tea.Cmd {
+	return c.initRoute(ctx)
 }
 
-func NewWithRoutes(routes Routes) *Component {
-	return &Component{Routes: routes}
-}
-
-func (c *Component) Init() tea.Cmd {
-	return c.initRoute()
-}
-
-func (c *Component) Update(msg tea.Msg) tea.Cmd {
-	var initCmd, updateCmd tea.Cmd
-
-	switch msg.(type) {
-	case reactea.RouteUpdatedMsg:
-		if c.currentComponent != nil {
-			c.currentComponent.Destroy()
-		}
-
-		initCmd = c.initRoute()
-	}
-
-	if c.currentComponent != nil {
-		updateCmd = c.currentComponent.Update(msg)
-	}
-
-	return tea.Batch(initCmd, updateCmd)
-}
-
-// Destroy tears down the routed component. Without it the router would inherit
-// BasicComponent's no-op and the current page would never be destroyed when the
-// app itself is torn down.
 func (c *Component) Destroy() {
-	if c.currentComponent != nil {
-		c.currentComponent.Destroy()
-		c.currentComponent = nil
+	if c.current != nil {
+		c.current.Destroy()
+		c.current = nil
 	}
 }
 
-// DecorateView hands the view to the routed component. The router draws it at
-// full size in the top left, so no cursor translation is needed.
-func (c *Component) DecorateView(view *tea.View) {
-	if c.currentComponent != nil {
-		reactea.DecorateView(c.currentComponent, view)
-	}
-}
+func (c *Component) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	var initCmd tea.Cmd
 
-func (c *Component) Render(width, height int) string {
-	if c.currentComponent != nil {
-		return c.currentComponent.Render(width, height)
+	if _, ok := msg.(reactea.RouteChangedMsg); ok {
+		c.Destroy()
+
+		initCmd = c.initRoute(ctx)
 	}
 
-	return fmt.Sprintf("Couldn't route for \"%s\"", reactea.CurrentRoute())
+	if c.current == nil {
+		return initCmd
+	}
+
+	return tea.Batch(initCmd, c.current.Update(ctx, msg))
 }
 
-func (c *Component) initRoute() tea.Cmd {
-	// Reset first so a failed (re-)route leaves currentComponent nil instead
-	// of a stale, already-Destroyed component. initRoute is only ever called
-	// after any previous component has been Destroyed (see Update), so this is
-	// safe.
-	c.currentComponent = nil
+func (c *Component) Render(ctx *reactea.Ctx) string {
+	// Init may never have run — a router built after the app started, or one
+	// mounted by a parent that skipped Init — so route lazily rather than
+	// rendering the not-found page by accident.
+	if c.current == nil && c.route != ctx.Route() {
+		c.initRoute(ctx)
+	}
 
-	if initializer, params, ok := c.findMatchingRouteInitializer(); ok {
-		c.currentComponent = initializer(params)
-		return c.currentComponent.Init()
+	if c.current != nil {
+		return c.current.Render(ctx)
+	}
+
+	if c.NotFound != nil {
+		return c.NotFound(ctx)
+	}
+
+	return fmt.Sprintf("Couldn't route for %q", ctx.Route())
+}
+
+func (c *Component) initRoute(ctx *reactea.Ctx) tea.Cmd {
+	c.current, c.route = nil, ctx.Route()
+
+	if initializer, params, ok := c.match(ctx.Route()); ok {
+		c.current = initializer(params)
+
+		return c.current.Init(ctx)
 	}
 
 	if initializer, ok := c.Routes["default"]; ok {
-		c.currentComponent = initializer(nil)
-		return c.currentComponent.Init()
+		c.current = initializer(nil)
+
+		return c.current.Init(ctx)
 	}
 
 	return nil
 }
 
-func (c *Component) findMatchingRouteInitializer() (RouteInitializer, Params, bool) {
-	currentRoute := reactea.CurrentRoute()
-
-	// Go randomizes map iteration order, so when more than one placeholder
-	// matches the current route we must not just return the first hit — that
-	// would pick a route at random. Instead choose the most specific match
-	// deterministically (literal segments beat params beat wildcards; ties are
-	// broken by placeholder string). "default" is handled as a fallback in
-	// initRoute and is never treated as a match here.
+func (c *Component) match(route string) (RouteInitializer, Params, bool) {
+	// Go randomises map iteration, so when more than one placeholder matches we
+	// must not take the first hit. Rank by specificity instead, with a string
+	// tie-break, so the choice is the same on every run.
 	var (
 		bestPlaceholder string
 		bestInit        RouteInitializer
@@ -118,30 +114,25 @@ func (c *Component) findMatchingRouteInitializer() (RouteInitializer, Params, bo
 			continue
 		}
 
-		params, ok := reactea.RouteMatchesPlaceholder(currentRoute, placeholder)
+		params, ok := reactea.MatchRoute(route, placeholder)
 		if !ok {
 			continue
 		}
 
 		if !found || moreSpecific(placeholder, bestPlaceholder) {
-			bestPlaceholder = placeholder
-			bestInit = initializer
-			bestParams = params
-			found = true
+			bestPlaceholder, bestInit, bestParams, found = placeholder, initializer, params, true
 		}
 	}
 
 	return bestInit, bestParams, found
 }
 
-// moreSpecific reports whether route placeholder a is a strictly better match
-// than b. A placeholder is scored segment by segment (left to right): a literal
-// segment is more specific than a single-level param (":"), which beats an
-// optional param ("?:"), which beats a catch-all ("+?:"). More segments win
-// when one is a prefix of the other. Equal specificity is broken by string
-// order so selection is always deterministic.
+// moreSpecific reports whether placeholder a beats b. Segments are scored left
+// to right: a literal beats a param (":"), which beats an optional ("?:"),
+// which beats a catch-all ("+?:"). More segments win when one is a prefix of
+// the other, and equal scores fall back to string order.
 func moreSpecific(a, b string) bool {
-	switch compareSpecificity(routeSpecificity(a), routeSpecificity(b)) {
+	switch compareSpecificity(specificity(a), specificity(b)) {
 	case 1:
 		return true
 	case -1:
@@ -151,7 +142,7 @@ func moreSpecific(a, b string) bool {
 	}
 }
 
-func routeSpecificity(placeholder string) []int {
+func specificity(placeholder string) []int {
 	levels := strings.Split(strings.TrimPrefix(placeholder, "/"), "/")
 	score := make([]int, len(levels))
 
@@ -177,6 +168,7 @@ func compareSpecificity(a, b []int) int {
 			if a[i] > b[i] {
 				return 1
 			}
+
 			return -1
 		}
 	}

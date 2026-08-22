@@ -1,3 +1,10 @@
+// Package modal stacks blocking overlays on top of a base component.
+//
+// A modal is an ordinary Component. It is pushed onto a Stack, it receives every
+// message while it is on top, and it finishes by returning a command built with
+// Return — which pops it and delivers its answer to the rest of the tree as an
+// ordinary message. Nothing blocks: no extra goroutine, no channel handshake,
+// no chance of parking the event loop.
 package modal
 
 import (
@@ -5,69 +12,106 @@ import (
 	"github.com/Hayao0819/reactea/v2"
 )
 
-type Modal[T any] struct {
-	ch chan<- ModalResult[T]
-	c  *Controller
+// Result carries a modal's answer back to whoever pushed it.
+type Result[T any] struct {
+	Value T
+	Err   error
 }
 
-//lint:ignore U1000 This function is used, but through interface
-func (modal *Modal[T]) initModal(resultChan chan<- ModalResult[T], controller *Controller) {
-	modal.ch = resultChan
-	modal.c = controller
+// Ok reports a value.
+func (r Result[T]) Ok() bool { return r.Err == nil }
+
+type dismissMsg struct{}
+
+// Dismiss closes the modal on top without an answer.
+func Dismiss() tea.Msg { return dismissMsg{} }
+
+// Return closes the modal on top and delivers value.
+func Return[T any](value T) tea.Cmd {
+	return tea.Batch(
+		Dismiss,
+		func() tea.Msg { return Result[T]{Value: value} },
+	)
 }
 
-func (modal *Modal[T]) Return(result ModalResult[T]) tea.Cmd {
-	// Hand the result to the flow goroutine (parked in Show/Get), then wait for
-	// it to advance to the next stable state before letting this Update pass
-	// continue. See Controller for why this handshake is needed for liveness.
-	modal.ch <- result
-	<-modal.c.resume
-
-	return reactea.Rerender
+// Fail closes the modal on top and delivers err.
+func Fail[T any](err error) tea.Cmd {
+	return tea.Batch(
+		Dismiss,
+		func() tea.Msg { return Result[T]{Err: err} },
+	)
 }
 
-func (modal *Modal[T]) Ok(result T) tea.Cmd {
-	return modal.Return(Ok(result))
+// Stack renders base until something is pushed on top of it.
+type Stack struct {
+	base   reactea.Component
+	modals []reactea.Component
 }
 
-func (modal *Modal[T]) Error(err error) tea.Cmd {
-	return modal.Return(Error[T](err))
+func New(base reactea.Component) *Stack {
+	return &Stack{base: base}
 }
 
-func Show[T any](c *Controller, modal ModalComponent[T]) ModalResult[T] {
-	resultChan := make(chan ModalResult[T])
+// Push puts a modal on top. It is initialised on the next Update, so Push is
+// safe to call from anywhere.
+func (s *Stack) Push(modal reactea.Component) tea.Cmd {
+	return func() tea.Msg { return pushMsg{modal: modal} }
+}
 
-	modal.initModal(resultChan, c)
+type pushMsg struct{ modal reactea.Component }
 
-	c.mu.Lock()
-	prevShown := c.shown
-	c.shown = true
-	c.modal = modal
-	c.initCmd = modal.Init()
-	c.cond.Broadcast()
-	c.mu.Unlock()
-
-	// If a previous modal's Return is waiting for the flow to advance, release
-	// it now that this modal is installed.
-	if prevShown {
-		c.resume <- struct{}{}
+// Top is the modal currently on top, or nil.
+func (s *Stack) Top() reactea.Component {
+	if len(s.modals) == 0 {
+		return nil
 	}
 
-	// Block this flow goroutine until the modal calls Return.
-	result := <-resultChan
+	return s.modals[len(s.modals)-1]
+}
 
-	// Tear the modal down deterministically here (on the flow goroutine), while
-	// holding the lock, so Render can never observe or destroy the wrong modal.
-	c.mu.Lock()
-	if c.modal == modal {
+func (s *Stack) Init(ctx *reactea.Ctx) tea.Cmd {
+	return s.base.Init(ctx)
+}
+
+func (s *Stack) Destroy() {
+	for _, modal := range s.modals {
 		modal.Destroy()
-		c.modal = nil
 	}
-	c.mu.Unlock()
 
-	return result
+	s.modals = nil
+
+	s.base.Destroy()
 }
 
-func Get[T any](c *Controller, modal ModalComponent[T]) T {
-	return Show(c, modal).Return
+func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case pushMsg:
+		s.modals = append(s.modals, msg.modal)
+
+		return msg.modal.Init(ctx)
+
+	case dismissMsg:
+		if top := s.Top(); top != nil {
+			top.Destroy()
+			s.modals = s.modals[:len(s.modals)-1]
+		}
+
+		return nil
+	}
+
+	// A modal is a blocking overlay: while one is up it takes the input, and the
+	// base sees nothing.
+	if top := s.Top(); top != nil {
+		return top.Update(ctx, msg)
+	}
+
+	return s.base.Update(ctx, msg)
+}
+
+func (s *Stack) Render(ctx *reactea.Ctx) string {
+	if top := s.Top(); top != nil {
+		return top.Render(ctx)
+	}
+
+	return s.base.Render(ctx)
 }

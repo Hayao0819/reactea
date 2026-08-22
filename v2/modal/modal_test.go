@@ -1,100 +1,216 @@
-package modal
+package modal_test
 
 import (
+	"errors"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/Hayao0819/reactea/v2"
+	"github.com/Hayao0819/reactea/v2/modal"
 )
 
-// promptModal is a minimal modal that returns its name when Enter is pressed.
-type promptModal struct {
+// prompt answers with its name the first time it is asked.
+type prompt struct {
 	reactea.BasicComponent
-	Modal[string]
 
-	name string
+	name      string
+	destroyed bool
 }
 
-func (m *promptModal) Render(int, int) string { return "prompt:" + m.name }
+func (c *prompt) Render(*reactea.Ctx) string { return "prompt:" + c.name }
+func (c *prompt) Destroy()                   { c.destroyed = true }
 
-func (m *promptModal) Update(msg tea.Msg) tea.Cmd {
-	if key, ok := msg.(tea.KeyPressMsg); ok && key.Code == tea.KeyEnter {
-		return m.Ok(m.name)
+func (c *prompt) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "enter" {
+		return modal.Return(c.name)
 	}
 
 	return nil
 }
 
-// A single modal that returns must not deadlock the event loop — this is the
-// case that the old waiter-based handshake could freeze permanently.
-func TestControllerSingleModal(t *testing.T) {
-	result := make(chan string, 1)
+type base struct {
+	reactea.BasicComponent
 
-	ctrl := NewController(func(c *Controller) func() tea.Cmd {
-		result <- Show(c, &promptModal{name: "hello"}).Return
+	seen int
+}
 
-		return func() tea.Cmd { return reactea.Destroy }
-	})
+func (c *base) Render(*reactea.Ctx) string { return "base" }
 
-	program := reactea.NewProgram(ctrl, reactea.WithoutInput(), tea.WithoutRenderer())
+func (c *base) Update(*reactea.Ctx, tea.Msg) tea.Cmd {
+	c.seen++
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		program.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	}()
+	return nil
+}
 
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
-	}
+func drive(t *testing.T, app *reactea.App, msg tea.Msg) {
+	t.Helper()
 
-	select {
-	case got := <-result:
-		if got != "hello" {
-			t.Errorf("expected \"hello\", got %q", got)
+	for depth := 0; msg != nil && depth < 8; depth++ {
+		_, cmd := app.Update(msg)
+		if cmd == nil {
+			return
 		}
-	default:
-		t.Error("modal never returned a result")
+
+		next := cmd()
+
+		if batch, ok := next.(tea.BatchMsg); ok {
+			for _, sub := range batch {
+				if produced := sub(); produced != nil {
+					drive(t, app, produced)
+				}
+			}
+
+			return
+		}
+
+		msg = next
 	}
 }
 
-// A flow of two modals shown in sequence must deliver both results in order and
-// tear down cleanly.
-func TestControllerSequentialModals(t *testing.T) {
-	out := make(chan []string, 1)
-	step := make(chan struct{})
+func TestPushRendersTheModalOverTheBase(t *testing.T) {
+	page := &base{}
+	stack := modal.New(page)
 
-	ctrl := NewController(func(c *Controller) func() tea.Cmd {
-		var got []string
+	app := reactea.New(stack, reactea.WithSize(20, 5))
 
-		got = append(got, Show(c, &promptModal{name: "first"}).Return)
-		step <- struct{}{}
+	app.Init()
 
-		got = append(got, Show(c, &promptModal{name: "second"}).Return)
-		step <- struct{}{}
-
-		out <- got
-
-		return func() tea.Cmd { return reactea.Destroy }
-	})
-
-	program := reactea.NewProgram(ctrl, reactea.WithoutInput(), tea.WithoutRenderer())
-
-	go func() {
-		enter := tea.KeyPressMsg{Code: tea.KeyEnter}
-
-		program.Send(enter) // completes the first modal
-		<-step
-		program.Send(enter) // completes the second modal
-		<-step
-	}()
-
-	if _, err := program.Run(); err != nil {
-		t.Fatal(err)
+	if got := app.View().Content; got != "base" {
+		t.Fatalf("content = %q", got)
 	}
 
-	got := <-out
-	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
-		t.Errorf("expected [first second], got %v", got)
+	drive(t, app, stack.Push(&prompt{name: "who"})())
+
+	if got := app.View().Content; got != "prompt:who" {
+		t.Errorf("content = %q", got)
+	}
+}
+
+func TestModalTakesTheInput(t *testing.T) {
+	page := &base{}
+	stack := modal.New(page)
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+
+	app.Init()
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+
+	if page.seen != 1 {
+		t.Fatalf("base saw %d messages before the modal", page.seen)
+	}
+
+	drive(t, app, stack.Push(&prompt{name: "who"})())
+
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+
+	if page.seen != 1 {
+		t.Errorf("base saw input while a modal was up (%d)", page.seen)
+	}
+}
+
+func TestReturnPopsAndDeliversTheResult(t *testing.T) {
+	stack := modal.New(&base{})
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+
+	app.Init()
+
+	shown := &prompt{name: "answer"}
+
+	drive(t, app, stack.Push(shown)())
+
+	// Enter makes the modal return; collect what comes back out.
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter produced no command")
+	}
+
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected a batch, got %T", cmd())
+	}
+
+	var result modal.Result[string]
+
+	for _, sub := range batch {
+		switch msg := sub().(type) {
+		case modal.Result[string]:
+			result = msg
+		default:
+			app.Update(msg)
+		}
+	}
+
+	if !result.Ok() || result.Value != "answer" {
+		t.Errorf("result = %+v", result)
+	}
+
+	if stack.Top() != nil {
+		t.Error("the modal was not popped")
+	}
+
+	if !shown.destroyed {
+		t.Error("the popped modal was not destroyed")
+	}
+
+	if got := app.View().Content; got != "base" {
+		t.Errorf("content after the modal = %q", got)
+	}
+}
+
+func TestFailDeliversAnError(t *testing.T) {
+	stack := modal.New(&base{})
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+
+	app.Init()
+
+	drive(t, app, stack.Push(&prompt{name: "x"})())
+
+	batch, ok := modal.Fail[string](errors.New("nope"))().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("Fail did not produce a batch")
+	}
+
+	var result modal.Result[string]
+
+	for _, sub := range batch {
+		switch msg := sub().(type) {
+		case modal.Result[string]:
+			result = msg
+		default:
+			app.Update(msg)
+		}
+	}
+
+	if result.Ok() {
+		t.Error("a failed result reported Ok")
+	}
+
+	if stack.Top() != nil {
+		t.Error("Fail did not pop the modal")
+	}
+}
+
+func TestDestroyTearsDownEverything(t *testing.T) {
+	stack := modal.New(&base{})
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+
+	app.Init()
+
+	first, second := &prompt{name: "a"}, &prompt{name: "b"}
+
+	drive(t, app, stack.Push(first)())
+	drive(t, app, stack.Push(second)())
+
+	stack.Destroy()
+
+	if !first.destroyed || !second.destroyed {
+		t.Errorf("stacked modals were not destroyed: %v %v", first.destroyed, second.destroyed)
+	}
+
+	if stack.Top() != nil {
+		t.Error("the stack was not emptied")
 	}
 }

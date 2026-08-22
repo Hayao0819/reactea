@@ -1,129 +1,277 @@
-package reactea
+package reactea_test
 
 import (
 	"bytes"
-	"errors"
+	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Hayao0819/reactea/v2"
 )
 
-func TestComponent(t *testing.T) {
-	var out bytes.Buffer
+type probe struct {
+	reactea.BasicComponent
 
-	type testState struct {
-		echoKey               string
-		lastWidth, lastHeight int
+	label string
+
+	width, height int
+	inited        bool
+	destroyed     bool
+	messages      []tea.Msg
+
+	onUpdate func(*reactea.Ctx, tea.Msg) tea.Cmd
+	onRender func(*reactea.Ctx)
+}
+
+func (c *probe) Init(*reactea.Ctx) tea.Cmd {
+	c.inited = true
+
+	return nil
+}
+
+func (c *probe) Destroy() { c.destroyed = true }
+
+func (c *probe) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	c.messages = append(c.messages, msg)
+
+	if c.onUpdate != nil {
+		return c.onUpdate(ctx, msg)
 	}
 
-	root := &mockComponent[testState]{
-		updateFunc: func(c Component, s *testState, msg tea.Msg) tea.Cmd {
-			switch msg := msg.(type) {
-			case tea.KeyMsg:
-				if msg.String() == "x" {
-					return Destroy
-				}
+	return nil
+}
 
-				s.echoKey = msg.String()
-			}
+func (c *probe) Render(ctx *reactea.Ctx) string {
+	c.width, c.height = ctx.Size()
 
-			SetRoute("/test/test/test")
-
-			return nil
-		},
-		renderFunc: func(c Component, s *testState, width, height int) string {
-			s.lastWidth, s.lastHeight = width, height
-
-			return s.echoKey
-		},
+	if c.onRender != nil {
+		c.onRender(ctx)
 	}
 
-	// WithWindowSize makes the startup WindowSizeMsg deterministic (v2 reports
-	// 0x0 for a non-TTY otherwise). We observe echo and size through component
-	// state rather than scraping the v2 renderer's ANSI output.
-	program := NewProgram(root, WithoutInput(), tea.WithOutput(&out), tea.WithWindowSize(1, 1))
+	return c.label
+}
 
-	go func() {
-		program.Send(tea.KeyPressMsg{Code: '~', Text: "~"})
+// A component can be driven with nothing but an App — no terminal, no program.
+func TestComponentDrivenWithoutAProgram(t *testing.T) {
+	root := &probe{label: "hello"}
 
-		time.Sleep(50 * time.Millisecond)
+	app := reactea.New(root, reactea.WithSize(40, 10))
 
-		program.Send(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	}()
+	app.Init()
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 
-	if _, err := program.Run(); err != nil {
+	view := app.View()
+
+	if !root.inited {
+		t.Error("Init did not reach the root")
+	}
+
+	if len(root.messages) != 1 {
+		t.Errorf("root saw %d messages", len(root.messages))
+	}
+
+	if view.Content != "hello" {
+		t.Errorf("content = %q", view.Content)
+	}
+
+	if root.width != 40 || root.height != 10 {
+		t.Errorf("root box = %dx%d, want 40x10", root.width, root.height)
+	}
+}
+
+// The whole point of the teardown filter: quitting the ordinary Bubbletea way
+// still destroys the tree.
+func TestTeaQuitRunsDestroy(t *testing.T) {
+	root := &probe{label: ""}
+
+	root.onUpdate = func(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
+		if _, ok := msg.(tea.KeyPressMsg); ok {
+			return tea.Quit
+		}
+
+		return nil
+	}
+
+	var in, out bytes.Buffer
+
+	in.WriteString("q")
+
+	if err := reactea.New(root).Run(tea.WithInput(&in), tea.WithOutput(&out)); err != nil {
 		t.Fatal(err)
 	}
 
-	if root.state.echoKey != "~" {
-		t.Errorf("expected echoed key \"~\", got %q", root.state.echoKey)
-	}
-
-	if WasRouteChanged() {
-		t.Errorf("current route was changed")
-	}
-
-	if CurrentRoute() != "/test/test/test" {
-		t.Errorf("current route is wrong, expected \"/test/test/test\", got \"%s\"", CurrentRoute())
-	}
-
-	if root.state.lastWidth != 1 {
-		t.Errorf("expected lastWidth 1, but got %d", root.state.lastWidth)
-	}
-
-	if root.state.lastHeight != 1 {
-		t.Errorf("expected lastHeight 1, but got %d", root.state.lastHeight)
+	if !root.destroyed {
+		t.Fatal("tea.Quit skipped Destroy")
 	}
 }
 
-// A panic in a command returned from Update must not crash the process with
-// the terminal left in raw/alt-screen mode. Reactea should restore the terminal
-// (via Kill) and let Run return, mirroring Bubbletea's own panic handling.
-func TestPanicInCommandRestoresTerminal(t *testing.T) {
-	root := &mockComponent[struct{}]{
-		updateFunc: func(c Component, s *struct{}, msg tea.Msg) tea.Cmd {
-			if _, ok := msg.(tea.KeyMsg); ok {
-				return func() tea.Msg { panic("boom from a command") }
-			}
+func TestCtxInsetTranslatesTheCursor(t *testing.T) {
+	root := &probe{label: "x"}
 
-			return nil
-		},
-		renderFunc: func(c Component, s *struct{}, width, height int) string {
-			return "test"
-		},
+	root.onRender = func(ctx *reactea.Ctx) {
+		ctx.Inset(3, 2, 10, 5).CursorAt(1, 1)
 	}
 
-	program := NewProgram(root, WithoutInput(), tea.WithoutRenderer())
+	app := reactea.New(root, reactea.WithSize(40, 10))
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		program.Send(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	}()
+	view := app.View()
 
-	_, err := program.Run()
+	if view.Cursor == nil {
+		t.Fatal("no cursor was reported")
+	}
 
-	// The process survived (no crash) and Run returned; Kill surfaces as
-	// ErrProgramKilled.
-	if !errors.Is(err, tea.ErrProgramKilled) {
-		t.Errorf("expected ErrProgramKilled after a panicking command, got %v", err)
+	if view.Cursor.X != 4 || view.Cursor.Y != 3 {
+		t.Errorf("cursor = (%d, %d), want (4, 3)", view.Cursor.X, view.Cursor.Y)
 	}
 }
 
-func TestNew(t *testing.T) {
-	t.Run("NewProgram", func(t *testing.T) {
-		root := &mockComponent[struct{}]{
-			renderFunc: func(c Component, s *struct{}, width, height int) string {
-				return "test passed"
-			},
+func TestCtxInsetClampsToTheParent(t *testing.T) {
+	ctx := reactea.New(&probe{}, reactea.WithSize(20, 8)).Ctx()
+
+	child := ctx.Inset(5, 2, 100, 100)
+
+	if w, h := child.Size(); w != 15 || h != 6 {
+		t.Errorf("child box = %dx%d, want 15x6", w, h)
+	}
+
+	if w, h := ctx.Inset(-5, -5, 4, 4).Size(); w != 4 || h != 4 {
+		t.Errorf("negative offsets produced %dx%d", w, h)
+	}
+}
+
+func TestDecorationsReachTheView(t *testing.T) {
+	root := &probe{label: "x"}
+
+	root.onRender = func(ctx *reactea.Ctx) {
+		ctx.AltScreen(true)
+		ctx.Title("reactea")
+	}
+
+	view := reactea.New(root, reactea.WithSize(10, 3)).View()
+
+	if !view.AltScreen {
+		t.Error("AltScreen was not carried through")
+	}
+
+	if view.WindowTitle != "reactea" {
+		t.Errorf("WindowTitle = %q", view.WindowTitle)
+	}
+}
+
+// Decorations are per frame, so a component that stops asking gets its way.
+func TestDecorationsResetEachFrame(t *testing.T) {
+	root := &probe{label: "x"}
+
+	decorate := true
+
+	root.onRender = func(ctx *reactea.Ctx) {
+		if decorate {
+			ctx.CursorAt(1, 1)
 		}
+	}
 
-		program := NewProgram(root, WithoutInput(), tea.WithoutRenderer())
+	app := reactea.New(root, reactea.WithSize(10, 3))
 
-		go program.Quit()
+	if app.View().Cursor == nil {
+		t.Fatal("no cursor on the first frame")
+	}
 
-		if _, err := program.Run(); err != nil {
-			t.Fatal(err)
-		}
-	})
+	decorate = false
+
+	if cursor := app.View().Cursor; cursor != nil {
+		t.Errorf("stale cursor survived the frame: %+v", cursor)
+	}
+}
+
+func TestRouteChangeIsDeliveredAsAMessage(t *testing.T) {
+	root := &probe{label: "x"}
+
+	app := reactea.New(root, reactea.WithSize(10, 3))
+
+	if app.Route() != "/" {
+		t.Fatalf("initial route = %q", app.Route())
+	}
+
+	_, cmd := app.Update(routeRequest(t, app, "/inbox"))
+	if cmd == nil {
+		t.Fatal("the route request produced no command")
+	}
+
+	if app.Route() != "/inbox" {
+		t.Errorf("route = %q, want /inbox", app.Route())
+	}
+
+	changed, ok := cmd().(reactea.RouteChangedMsg)
+	if !ok {
+		t.Fatalf("cmd produced %T, want RouteChangedMsg", cmd())
+	}
+
+	if changed.From != "/" || changed.To != "/inbox" {
+		t.Errorf("changed = %+v", changed)
+	}
+}
+
+func TestRouteChangeToTheSameRouteIsANoop(t *testing.T) {
+	app := reactea.New(&probe{}, reactea.WithRoute("/inbox"))
+
+	if _, cmd := app.Update(routeRequest(t, app, "/inbox")); cmd != nil {
+		t.Error("re-routing to the current route produced a command")
+	}
+}
+
+func TestNavigateIsRelative(t *testing.T) {
+	app := reactea.New(&probe{}, reactea.WithRoute("/a/b"))
+
+	app.Update(navigate(t, app, ".."))
+
+	if app.Route() != "/a" {
+		t.Errorf("route = %q, want /a", app.Route())
+	}
+
+	app.Update(navigate(t, app, "c"))
+
+	if app.Route() != "/a/c" {
+		t.Errorf("route = %q, want /a/c", app.Route())
+	}
+}
+
+// Two apps in one process must not share a route.
+func TestAppsAreIndependent(t *testing.T) {
+	first := reactea.New(&probe{}, reactea.WithRoute("/first"))
+	second := reactea.New(&probe{}, reactea.WithRoute("/second"))
+
+	first.Update(routeRequest(t, first, "/moved"))
+
+	if second.Route() != "/second" {
+		t.Errorf("the second app's route moved to %q", second.Route())
+	}
+}
+
+func TestFuncAndText(t *testing.T) {
+	app := reactea.New(reactea.Func(func(ctx *reactea.Ctx) string {
+		width, _ := ctx.Size()
+
+		return strings.Repeat("-", width)
+	}), reactea.WithSize(5, 1))
+
+	if got := app.View().Content; got != "-----" {
+		t.Errorf("Func rendered %q", got)
+	}
+
+	if got := reactea.New(reactea.Text("hi"), reactea.WithSize(5, 1)).View().Content; got != "hi" {
+		t.Errorf("Text rendered %q", got)
+	}
+}
+
+// routeRequest builds the message Ctx.SetRoute produces.
+func routeRequest(t *testing.T, app *reactea.App, target string) tea.Msg {
+	t.Helper()
+
+	return app.Ctx().SetRoute(target)()
+}
+
+func navigate(t *testing.T, app *reactea.App, target string) tea.Msg {
+	t.Helper()
+
+	return app.Ctx().Navigate(target)()
 }
