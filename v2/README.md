@@ -238,6 +238,33 @@ own render, so a parent that draws a child at an offset applies
 
 `Reactify` forwards the wrapped model's cursor, and nothing else from its view.
 
+## Layout
+
+`Render(int, int)` hands a component its box, but working out each child's box
+was left to the parent. The `layout` package does it along one axis, the way a
+single-axis flexbox does.
+
+```go
+layout.Column(
+    layout.Fixed(1, header),
+    layout.Grow(1, page),
+    layout.Fixed(1, footer),
+)
+```
+
+`Fixed` takes exactly that many cells, `Grow` takes a share of what is left
+weighted against the other growing items, and `Bounded` is `Grow` with a floor
+and a ceiling. Every cell is handed out — the remainder from an uneven split goes
+to the items with the largest fractional share, so three `Grow(1, …)` items in a
+10-cell box get 4, 3 and 3, never 3, 3 and 3. Items get the full cross axis.
+
+A `Box` is itself a `Component`, so it nests, and it forwards `Init`, `Update`
+and `Destroy` to every item. It also remembers where it placed each child, which
+means **it translates their cursors for you** — the offset arithmetic that
+`TranslateCursor` otherwise leaves to the parent. Child decorations are merged
+field by field rather than last-one-wins: an empty title or a nil cursor from one
+child no longer wipes out what a sibling asked for.
+
 ## Wrapping Bubbletea models and bubbles widgets
 
 The two need different adapters, because a bubbles widget is not a `tea.Model`
