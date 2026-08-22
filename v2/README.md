@@ -237,16 +237,32 @@ own render, so a parent that draws a child at an offset applies
 `reactea.TranslateCursor(view, dx, dy)` after collecting it.
 
 `Reactify` forwards the wrapped model's cursor, and nothing else from its view.
-That only covers types satisfying `tea.Model`. The bubbles v2 widgets are not
-among them: they still return `View() string` and hand out the cursor separately
-through `Cursor() *tea.Cursor`. A component holding a `textinput` turns off the
-virtual cursor and reports the real one itself
+
+## Wrapping Bubbletea models and bubbles widgets
+
+The two need different adapters, because a bubbles widget is not a `tea.Model`
+and never has been — not in v1 either. A widget's `Update` returns its own
+concrete type (`func (m Model) Update(tea.Msg) (Model, tea.Cmd)`) so that you can
+write `m.input, cmd = m.input.Update(msg)` without a type assertion, and Go has
+no covariant returns. In v2 the `View() string` signature is a second mismatch.
+
+|                     | Wraps                          | Constraint            |
+|---------------------|--------------------------------|-----------------------|
+| `Reactify`          | a self-contained Bubbletea model | `tea.Model`         |
+| `ReactifyWidget`    | a bubbles widget                 | `Widget[T]`         |
 
 ```go
-func (c *Component) DecorateView(view *tea.View) {
-    view.Cursor = c.textinput.Cursor()
-}
+input := textinput.New()
+input.SetVirtualCursor(false)
+input.Focus()
+
+component := reactea.ReactifyWidget(input) // reactea.Component
 ```
+
+`ReactifyWidget` stores the widget value back after every `Update`, calls the
+widget's `Init()` when it has one, and reports its cursor through
+`DecorateView`. Widgets draw a virtual cursor into their string by default and
+report no real cursor in that mode; reactea leaves that choice to you.
 
 ## Stateless components
 
