@@ -58,6 +58,23 @@ func WithSize(width, height int) Option {
 	}
 }
 
+// WithTerminal seeds terminal state before the first frame. Bubbletea renders
+// once before running Init's commands, so asking with a command alone flashes a
+// frame onto the primary screen.
+func WithTerminal(apply func(*tea.View)) Option {
+	return func(a *App) { apply(&a.terminal) }
+}
+
+// WithAltScreen starts in the alternate screen buffer.
+func WithAltScreen() Option {
+	return WithTerminal(func(view *tea.View) { view.AltScreen = true })
+}
+
+// WithWindowTitle sets the terminal window title.
+func WithWindowTitle(title string) Option {
+	return WithTerminal(func(view *tea.View) { view.WindowTitle = title })
+}
+
 // New builds an App around root.
 func New(root Component, options ...Option) *App {
 	app := &App{
