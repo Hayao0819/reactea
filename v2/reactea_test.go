@@ -51,7 +51,6 @@ func (c *probe) Render(ctx *reactea.Ctx) string {
 	return c.label
 }
 
-// A component can be driven with nothing but an App — no terminal, no program.
 func TestComponentDrivenWithoutAProgram(t *testing.T) {
 	root := &probe{label: "hello"}
 
@@ -79,8 +78,6 @@ func TestComponentDrivenWithoutAProgram(t *testing.T) {
 	}
 }
 
-// The whole point of the teardown filter: quitting the ordinary Bubbletea way
-// still runs the cleanups.
 func TestTeaQuitRunsCleanups(t *testing.T) {
 	root := &probe{label: ""}
 
@@ -120,7 +117,6 @@ func TestCleanupsRunNewestFirst(t *testing.T) {
 	}
 }
 
-// Registering on a closed scope must not strand the cleanup.
 func TestCleanupOnAClosedScopeRunsAtOnce(t *testing.T) {
 	scope := reactea.NewScope()
 
@@ -184,8 +180,6 @@ func TestCtxInsetClampsToTheParent(t *testing.T) {
 	}
 }
 
-// Terminal state is asked for with a command and then persists, so Render stays
-// a function of the component's state.
 func TestTerminalCommandsPersistAcrossFrames(t *testing.T) {
 	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 3))
 
@@ -211,7 +205,6 @@ func TestTerminalCommandsPersistAcrossFrames(t *testing.T) {
 	}
 }
 
-// The cursor is per frame, so a component that stops asking gets its way.
 func TestCursorResetsEachFrame(t *testing.T) {
 	root := &probe{label: "x"}
 
@@ -288,7 +281,6 @@ func TestNavigateIsRelative(t *testing.T) {
 	}
 }
 
-// Two apps in one process must not share a route.
 func TestAppsAreIndependent(t *testing.T) {
 	first := reactea.New(&probe{}, reactea.WithRoute("/first"))
 	second := reactea.New(&probe{}, reactea.WithRoute("/second"))
@@ -316,7 +308,6 @@ func TestFuncAndText(t *testing.T) {
 	}
 }
 
-// routeRequest builds the message Ctx.SetRoute produces.
 func routeRequest(t *testing.T, app *reactea.App, target string) tea.Msg {
 	t.Helper()
 
@@ -327,4 +318,19 @@ func navigate(t *testing.T, app *reactea.App, target string) tea.Msg {
 	t.Helper()
 
 	return app.Ctx().Navigate(target)()
+}
+
+func TestPanickingCleanupIsIsolated(t *testing.T) {
+	ran := false
+
+	scope := reactea.NewScope()
+
+	scope.OnDestroy(func() { ran = true })
+	scope.OnDestroy(func() { panic("boom") })
+
+	scope.Close()
+
+	if !ran {
+		t.Error("an earlier cleanup was stranded by a panicking one")
+	}
 }
