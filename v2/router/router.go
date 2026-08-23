@@ -15,17 +15,17 @@ type RouteInitializer func(Params) reactea.Component
 
 type Routes = map[string]RouteInitializer
 
-// Component renders whichever route matches, re-initialising when the route
-// changes and destroying the page it replaces.
+// Component renders whichever route matches, remounting when the match changes.
 type Component struct {
 	Routes Routes
 
 	// NotFound renders when nothing matched and there is no "default" route.
 	NotFound reactea.RenderFunc
 
-	current reactea.Component
-	scope   *reactea.Scope
-	route   string
+	current     reactea.Component
+	scope       *reactea.Scope
+	placeholder string
+	params      Params
 }
 
 func New() *Component { return &Component{} }
@@ -36,28 +36,26 @@ func NewWithRoutes(routes Routes) *Component { return &Component{Routes: routes}
 func (c *Component) Current() reactea.Component { return c.current }
 
 func (c *Component) Init(ctx *reactea.Ctx) tea.Cmd {
-	return c.initRoute(ctx)
+	return c.sync(ctx)
 }
 
-// Unmount drops the current page and closes its scope, running whatever
-// cleanups it registered. The router does this on every route change; an
-// enclosing component does not have to.
+// Unmount closes the page's scope. The router does this on every route change;
+// an enclosing component does not have to.
 func (c *Component) Unmount() {
 	if c.scope != nil {
 		c.scope.Close()
 		c.scope = nil
 	}
 
-	c.current = nil
+	c.current, c.placeholder, c.params = nil, "", nil
 }
 
 func (c *Component) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	var initCmd tea.Cmd
 
-	if _, ok := msg.(reactea.RouteChangedMsg); ok {
-		c.Unmount()
-
-		initCmd = c.initRoute(ctx)
+	_, routed := msg.(reactea.RouteChangedMsg)
+	if routed || c.current == nil {
+		initCmd = c.sync(ctx)
 	}
 
 	if c.current == nil {
@@ -68,13 +66,8 @@ func (c *Component) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 }
 
 func (c *Component) Render(ctx *reactea.Ctx) string {
-	// Init may never have run — a router built after the app started, or one
-	// mounted by a parent that skipped Init — so route lazily rather than
-	// rendering the not-found page by accident.
-	if c.current == nil && c.route != ctx.Route() {
-		c.initRoute(ctx)
-	}
-
+	// Mounting here would throw away the page's Init command, so a router that
+	// has never been through Init or Update renders not-found until it has.
 	if c.current != nil {
 		return c.current.Render(ctx.WithScope(c.scope))
 	}
@@ -86,30 +79,88 @@ func (c *Component) Render(ctx *reactea.Ctx) string {
 	return fmt.Sprintf("Couldn't route for %q", ctx.Route())
 }
 
-func (c *Component) initRoute(ctx *reactea.Ctx) tea.Cmd {
-	c.current, c.route = nil, ctx.Route()
+// A route change resolving to the same page leaves it mounted, so a nested
+// router does not tear down its parent's page.
+func (c *Component) sync(ctx *reactea.Ctx) tea.Cmd {
+	placeholder, initializer, params, ok := c.resolve(ctx.Route())
 
-	initializer, params, ok := c.match(ctx.Route())
-	if !ok {
-		if initializer, ok = c.Routes["default"]; !ok {
-			return nil
-		}
-
-		params = nil
+	if c.current != nil && placeholder == c.placeholder && sameParams(params, c.params, placeholder) {
+		return nil
 	}
 
-	// The page gets a scope of its own so the next route change can tear down
-	// exactly what this page registered, and nothing else.
+	c.Unmount()
+
+	if !ok {
+		return nil
+	}
+
+	c.placeholder, c.params = placeholder, params
+
+	// Its own scope, so the next route change tears down this page and nothing
+	// else.
 	c.scope = ctx.Scope().Child()
 	c.current = initializer(params)
 
 	return c.current.Init(ctx.WithScope(c.scope))
 }
 
-func (c *Component) match(route string) (RouteInitializer, Params, bool) {
-	// Go randomises map iteration, so when more than one placeholder matches we
-	// must not take the first hit. Rank by specificity instead, with a string
-	// tie-break, so the choice is the same on every run.
+func (c *Component) resolve(route string) (string, RouteInitializer, Params, bool) {
+	if placeholder, initializer, params, ok := c.match(route); ok {
+		return placeholder, initializer, params, true
+	}
+
+	if initializer, ok := c.Routes["default"]; ok {
+		return "default", initializer, nil, true
+	}
+
+	return "", nil, nil, false
+}
+
+// sameParams compares what the page was mounted with, ignoring "$" (the whole
+// route) and whatever a trailing catch-all swallowed: both belong to whatever is
+// nested below, not to this page.
+func sameParams(a, b Params, placeholder string) bool {
+	owned := func(params Params) map[string]string {
+		mine := make(map[string]string, len(params))
+
+		for key, value := range params {
+			if key != "$" && key != catchAllName(placeholder) {
+				mine[key] = value
+			}
+		}
+
+		return mine
+	}
+
+	first, second := owned(a), owned(b)
+
+	if len(first) != len(second) {
+		return false
+	}
+
+	for key, value := range first {
+		if second[key] != value {
+			return false
+		}
+	}
+
+	return true
+}
+
+func catchAllName(placeholder string) string {
+	levels := strings.Split(placeholder, "/")
+
+	last := levels[len(levels)-1]
+	if !strings.HasPrefix(last, "+?:") {
+		return ""
+	}
+
+	return last[3:]
+}
+
+func (c *Component) match(route string) (string, RouteInitializer, Params, bool) {
+	// Go randomises map iteration, so ties are broken by specificity then string
+	// order to keep the choice stable across runs.
 	var (
 		bestPlaceholder string
 		bestInit        RouteInitializer
@@ -132,13 +183,9 @@ func (c *Component) match(route string) (RouteInitializer, Params, bool) {
 		}
 	}
 
-	return bestInit, bestParams, found
+	return bestPlaceholder, bestInit, bestParams, found
 }
 
-// moreSpecific reports whether placeholder a beats b. Segments are scored left
-// to right: a literal beats a param (":"), which beats an optional ("?:"),
-// which beats a catch-all ("+?:"). More segments win when one is a prefix of
-// the other, and equal scores fall back to string order.
 func moreSpecific(a, b string) bool {
 	switch compareSpecificity(specificity(a), specificity(b)) {
 	case 1:

@@ -105,8 +105,6 @@ func TestParamsReachThePage(t *testing.T) {
 	}
 }
 
-// When several placeholders match, the most specific one has to win on every
-// run — not be picked at random by Go's map iteration order.
 func TestSpecificityIsDeterministic(t *testing.T) {
 	routes := pages(map[string]string{
 		"/user/:id":      "PARAM",
@@ -149,8 +147,6 @@ func TestRouteChangeSwapsThePage(t *testing.T) {
 	}
 }
 
-// Closing the app's root scope has to reach a page mounted under the router,
-// without the router being asked to forward anything.
 func TestRootTeardownReachesTheRoutedPage(t *testing.T) {
 	component := router.NewWithRoutes(pages(map[string]string{"default": "PAGE"}))
 
@@ -167,7 +163,6 @@ func TestRootTeardownReachesTheRoutedPage(t *testing.T) {
 	}
 }
 
-// A page's cleanups run when it is routed away from, and not before.
 func TestUnmountRunsOnlyThatPagesCleanups(t *testing.T) {
 	component := router.NewWithRoutes(pages(map[string]string{"/a": "A", "/b": "B"}))
 
@@ -226,4 +221,81 @@ func (c *countingPage) Update(*reactea.Ctx, tea.Msg) tea.Cmd {
 	*c.seen++
 
 	return nil
+}
+
+// A nested router would otherwise tear down its parent's page on every
+// sub-route move.
+func TestUnchangedMatchKeepsThePageMounted(t *testing.T) {
+	routes := router.Routes{
+		"/team/:id/+?:rest": func(params router.Params) reactea.Component {
+			return &page{label: "team " + params["id"]}
+		},
+	}
+
+	component := router.NewWithRoutes(routes)
+
+	app := reactea.New(component, reactea.WithRoute("/team/42/chat"), reactea.WithSize(20, 5))
+
+	app.Init()
+
+	first := component.Current()
+
+	_, cmd := app.Update(app.Ctx().SetRoute("/team/42/files")())
+	app.Update(cmd())
+
+	if component.Current() != first {
+		t.Error("the page was remounted although its match did not change")
+	}
+
+	if first.(*page).destroyed {
+		t.Error("the page's cleanup ran although it stayed mounted")
+	}
+
+	_, cmd = app.Update(app.Ctx().SetRoute("/team/7/chat")())
+	app.Update(cmd())
+
+	if component.Current() == first {
+		t.Error("a changed param did not remount the page")
+	}
+}
+
+func TestPageInitCommandSurvivesMounting(t *testing.T) {
+	var initialised bool
+
+	routes := router.Routes{
+		"default": func(router.Params) reactea.Component {
+			return &commandPage{onInit: func() { initialised = true }}
+		},
+	}
+
+	component := router.NewWithRoutes(routes)
+
+	app := reactea.New(component, reactea.WithSize(20, 5))
+
+	cmd := app.Init()
+	if cmd == nil {
+		t.Fatal("the page's Init command was dropped")
+	}
+
+	cmd()
+
+	if !initialised {
+		t.Error("the page's Init command never ran")
+	}
+}
+
+type commandPage struct {
+	reactea.BasicComponent
+
+	onInit func()
+}
+
+func (c *commandPage) Render(*reactea.Ctx) string { return "" }
+
+func (c *commandPage) Init(*reactea.Ctx) tea.Cmd {
+	return func() tea.Msg {
+		c.onInit()
+
+		return nil
+	}
 }
