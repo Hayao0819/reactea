@@ -66,3 +66,31 @@ func TestKey(t *testing.T) {
 		t.Error("a non-key message matched")
 	}
 }
+
+func TestMouseIsLocalToTheBox(t *testing.T) {
+	ctx := reactea.New(&probe{}, reactea.WithSize(40, 10)).Ctx().Inset(10, 4, 8, 3)
+
+	click := func(x, y int) tea.Msg {
+		return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
+	}
+
+	if x, y, ok := reactea.Mouse(ctx, click(12, 5)); !ok || x != 2 || y != 1 {
+		t.Errorf("inside the box = (%d, %d, %v), want (2, 1, true)", x, y, ok)
+	}
+
+	if _, _, ok := reactea.Mouse(ctx, click(9, 5)); ok {
+		t.Error("a click left of the box was claimed")
+	}
+
+	if _, _, ok := reactea.Mouse(ctx, click(18, 5)); ok {
+		t.Error("a click right of the box was claimed")
+	}
+
+	if _, _, ok := reactea.Mouse(ctx, click(12, 7)); ok {
+		t.Error("a click below the box was claimed")
+	}
+
+	if _, _, ok := reactea.Mouse(ctx, tea.KeyPressMsg{Code: 'q'}); ok {
+		t.Error("a key press was claimed as a mouse event")
+	}
+}
