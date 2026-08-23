@@ -237,3 +237,13 @@ func compareSpecificity(a, b []int) int {
 		return 0
 	}
 }
+
+// Page adapts a constructor that takes no route params.
+func Page[TComponent reactea.Component](construct func() TComponent) RouteInitializer {
+	return func(Params) reactea.Component { return construct() }
+}
+
+// Param adapts a constructor that takes one route param by name.
+func Param[TComponent reactea.Component](name string, construct func(string) TComponent) RouteInitializer {
+	return func(params Params) reactea.Component { return construct(params[name]) }
+}

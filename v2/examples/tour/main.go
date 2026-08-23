@@ -34,19 +34,21 @@ func main() {
 }
 
 type root struct {
+	reactea.Wrapper
+
 	stack *modal.Stack
 }
 
 func newRoot() *root {
 	pages := router.NewWithRoutes(router.Routes{
-		"/inbox":    func(router.Params) reactea.Component { return newInbox() },
-		"/mail/:id": func(p router.Params) reactea.Component { return newMail(p["id"]) },
-		"default":   func(router.Params) reactea.Component { return reactea.Text("nothing here") },
+		"/inbox":    router.Page(newInbox),
+		"/mail/:id": router.Param("id", newMail),
+		"default":   router.Page(func() reactea.Component { return reactea.Text("nothing here") }),
 	})
 
 	pages.NotFound = func(ctx *reactea.Ctx) string { return "no page at " + ctx.Route() }
 
-	body := layout.Column(
+	stack := modal.New(layout.Column(
 		layout.Fixed(1, reactea.Func(func(ctx *reactea.Ctx) string {
 			return headerStyle.Width(ctx.Width()).Render(" reactea tour  " + ctx.Route())
 		})),
@@ -55,47 +57,34 @@ func newRoot() *root {
 			layout.Grow(3, layout.Framed(paneStyle, pages)),
 		)),
 		layout.Fixed(1, reactea.Text(" tab compose · q quit")),
-	)
+	))
 
-	return &root{stack: modal.New(body)}
+	return &root{Wrapper: reactea.Wrap(stack), stack: stack}
 }
-
-func (r *root) Init(ctx *reactea.Ctx) tea.Cmd { return r.stack.Init(ctx) }
-
-func (r *root) Render(ctx *reactea.Ctx) string { return r.stack.Render(ctx) }
 
 func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return tea.Quit
-		case "tab":
-			return r.stack.Push(newCompose())
-		}
-
-	case modal.Result[string]:
-		if msg.Ok() {
-			return ctx.SetRoute("/mail/" + msg.Value)
-		}
+	switch {
+	case reactea.Key(msg, "q", "ctrl+c"):
+		return tea.Quit
+	case reactea.Key(msg, "tab"):
+		return r.stack.Push(newCompose())
 	}
 
-	return r.stack.Update(ctx, msg)
-}
-
-type sidebar struct {
-	reactea.BasicComponent
-}
-
-func newSidebar() *sidebar { return &sidebar{} }
-
-func (c *sidebar) Render(ctx *reactea.Ctx) string {
-	marker := "  "
-	if ctx.Route() == "/inbox" {
-		marker = "▸ "
+	if answer, ok := msg.(modal.Result[string]); ok && answer.Ok() {
+		return ctx.SetRoute("/mail/" + answer.Value)
 	}
 
-	return marker + "Inbox\n  Sent"
+	return r.Wrapper.Update(ctx, msg)
+}
+
+func newSidebar() reactea.Component {
+	return reactea.Func(func(ctx *reactea.Ctx) string {
+		if ctx.Route() == "/inbox" {
+			return "▸ Inbox\n  Sent"
+		}
+
+		return "  Inbox\n  Sent"
+	})
 }
 
 type inbox struct {
@@ -139,7 +128,7 @@ func newMail(id string) *mail { return &mail{id: id} }
 func (c *mail) Render(*reactea.Ctx) string { return "mail " + c.id }
 
 func (c *mail) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
-	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "esc" {
+	if reactea.Key(msg, "esc") {
 		return ctx.Navigate("..")
 	}
 
@@ -147,7 +136,7 @@ func (c *mail) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 }
 
 type compose struct {
-	reactea.BasicComponent
+	reactea.Wrapper
 
 	input *reactea.ReactifiedWidget[textinput.Model]
 }
@@ -157,24 +146,23 @@ func newCompose() *compose {
 	input.SetVirtualCursor(false)
 	input.Focus()
 
-	return &compose{input: reactea.ReactifyWidget(input)}
+	widget := reactea.ReactifyWidget(input)
+
+	return &compose{Wrapper: reactea.Wrap(widget), input: widget}
 }
 
-func (c *compose) Init(ctx *reactea.Ctx) tea.Cmd { return c.input.Init(ctx) }
-
 func (c *compose) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "enter":
-			return modal.Return(c.input.Widget.Value())
-		case "esc":
-			return modal.Dismiss
-		}
+	switch {
+	case reactea.Key(msg, "enter"):
+		return modal.Return(c.input.Widget.Value())
+	case reactea.Key(msg, "esc"):
+		return modal.Dismiss
 	}
 
-	return c.input.Update(ctx, msg)
+	return c.Wrapper.Update(ctx, msg)
 }
 
 func (c *compose) Render(ctx *reactea.Ctx) string {
-	return paneStyle.Width(ctx.Width()).Render("open mail id:\n" + c.input.Render(ctx.Inset(1, 1, ctx.Width()-2, 1)))
+	return paneStyle.Width(ctx.Width()).Render(
+		"open mail id:\n" + c.Wrapper.Render(ctx.Inset(1, 1, ctx.Width()-2, 1)))
 }

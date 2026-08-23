@@ -299,3 +299,21 @@ func (c *commandPage) Init(*reactea.Ctx) tea.Cmd {
 		return nil
 	}
 }
+
+func TestPageAndParamAdapters(t *testing.T) {
+	newHome := func() *page { return &page{label: "HOME"} }
+	newMail := func(id string) *page { return &page{label: "mail " + id} }
+
+	routes := router.Routes{
+		"/home":     router.Page(newHome),
+		"/mail/:id": router.Param("id", newMail),
+	}
+
+	if content, _ := render(t, routes, "/home"); !strings.Contains(content, "HOME") {
+		t.Errorf("content = %q", content)
+	}
+
+	if content, _ := render(t, routes, "/mail/42"); !strings.Contains(content, "mail 42") {
+		t.Errorf("content = %q", content)
+	}
+}
