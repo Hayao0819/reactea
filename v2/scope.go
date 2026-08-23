@@ -1,26 +1,20 @@
 package reactea
 
-// Scope owns the cleanups of everything mounted under it. Closing a scope runs
-// them, newest first, and closes the scopes nested inside it.
-//
-// This is what replaced a Destroy method on Component. A component that holds no
-// resource writes nothing; one that does registers a cleanup with
-// Ctx.OnDestroy and stops caring who tears it down. A parent that mounts and
-// unmounts children — the router, the modal stack — gives each child a Child
-// scope and closes it when the child goes away. Everything else is covered by
-// the app's root scope, which closes when the program ends, so nothing can be
-// stranded by a parent that forgot to forward a call.
+// Scope owns the cleanups of everything mounted under it. It replaces a Destroy
+// method on Component: a parent that mounts and unmounts children gives each a
+// Child scope, and everything else falls back to the app's root scope, so a
+// forgotten call cannot strand a cleanup.
 type Scope struct {
 	cleanups []func()
 	children []*Scope
 	closed   bool
 }
 
+// NewScope opens a scope with no parent.
 func NewScope() *Scope { return &Scope{} }
 
-// Child opens a nested scope. Closing the parent closes it too, so a child
-// scope is never stranded, and closing the child early is the normal way to
-// unmount one thing without touching the rest.
+// Child opens a nested scope. Closing the parent closes it too; closing the
+// child early unmounts one thing without touching the rest.
 func (s *Scope) Child() *Scope {
 	child := NewScope()
 
@@ -30,8 +24,8 @@ func (s *Scope) Child() *Scope {
 		return child
 	}
 
-	// Drop the ones that already closed so a long-lived parent does not collect
-	// a scope per route change.
+	// Drop closed ones so a long-lived parent does not collect a scope per route
+	// change.
 	live := s.children[:0]
 
 	for _, existing := range s.children {
@@ -45,8 +39,7 @@ func (s *Scope) Child() *Scope {
 	return child
 }
 
-// OnDestroy registers a cleanup. Registering on a scope that is already closed
-// runs the cleanup at once, so a late arrival cannot be stranded.
+// OnDestroy runs the cleanup at once if the scope has already closed.
 func (s *Scope) OnDestroy(cleanup func()) {
 	if cleanup == nil {
 		return
@@ -61,8 +54,7 @@ func (s *Scope) OnDestroy(cleanup func()) {
 	s.cleanups = append(s.cleanups, cleanup)
 }
 
-// Close closes the nested scopes and runs the registered cleanups, newest
-// first. Closing twice is a no-op.
+// Close runs the cleanups newest first. Closing twice is a no-op.
 func (s *Scope) Close() {
 	if s.closed {
 		return
@@ -77,7 +69,7 @@ func (s *Scope) Close() {
 	s.children = nil
 
 	for i := len(s.cleanups) - 1; i >= 0; i-- {
-		s.cleanups[i]()
+		run(s.cleanups[i])
 	}
 
 	s.cleanups = nil
@@ -85,3 +77,11 @@ func (s *Scope) Close() {
 
 // Closed reports whether Close has run.
 func (s *Scope) Closed() bool { return s.closed }
+
+// run isolates a cleanup: one that panics must not strand the ones registered
+// before it.
+func run(cleanup func()) {
+	defer func() { _ = recover() }()
+
+	cleanup()
+}
