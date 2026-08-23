@@ -98,7 +98,6 @@ func TestRowSplitsWidthByWeight(t *testing.T) {
 	}
 }
 
-// Every cell has to be handed out even when the split does not divide evenly.
 func TestDistributionLosesNoCells(t *testing.T) {
 	cases := []struct {
 		total   int
@@ -156,8 +155,6 @@ func TestBoundedRespectsMinAndMax(t *testing.T) {
 	}
 }
 
-// The whole point of the package: a child's cursor comes back in screen
-// coordinates without the parent doing the arithmetic.
 func TestCursorIsTranslatedByOffset(t *testing.T) {
 	body := &probe{label: "b", wantsCursor: true, cursorX: 3, cursorY: 2}
 
@@ -186,7 +183,6 @@ func TestRowTranslatesCursorHorizontally(t *testing.T) {
 	}
 }
 
-// Update must see the same split Render does, without Render having run first.
 func TestUpdateSeesTheSameSplit(t *testing.T) {
 	body := &probe{label: "b"}
 

@@ -6,12 +6,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Bubbletea v2 moved the alt-screen, the window title, mouse mode and the
-// terminal colours out of commands and onto the view the root model returns.
-// They are still state, though: a component decides them when it mounts, not
-// sixty times a second. So reactea takes them as commands, holds them on the
-// App and puts them on every frame — which is what keeps Render free to be a
-// function of the component's state and nothing else.
+// Bubbletea v2 moved these onto the view. Reactea keeps them as commands so
+// Render stays a function of the component's state.
 type terminalMsg struct{ apply func(*tea.View) }
 
 func terminalCmd(apply func(*tea.View)) tea.Cmd {

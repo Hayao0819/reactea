@@ -1,5 +1,4 @@
-// Package layout splits a box among child components the way a single-axis
-// flexbox does, so a parent no longer computes child sizes or cursor offsets.
+// Package layout splits a box among child components along one axis.
 package layout
 
 import (
@@ -8,6 +7,7 @@ import (
 	"github.com/Hayao0819/reactea/v2"
 )
 
+// Direction is the axis a Box lays its items out along.
 type Direction int
 
 const (
@@ -31,13 +31,12 @@ func Fixed(size int, component reactea.Component) Item {
 	return Item{Component: component, Size: size}
 }
 
-// Grow gives the child a share of the leftover space, proportional to weight
-// against the other growing items.
+// Grow gives the child a share of what is left, proportional to weight.
 func Grow(weight int, component reactea.Component) Item {
 	return Item{Component: component, Grow: weight}
 }
 
-// Bounded is Grow with a floor and a ceiling. A zero max means unbounded.
+// Bounded is Grow with a floor and a ceiling. A zero maximum means unbounded.
 func Bounded(weight, minimum, maximum int, component reactea.Component) Item {
 	return Item{Component: component, Grow: weight, Min: minimum, Max: maximum}
 }
@@ -48,6 +47,7 @@ type Box struct {
 	items     []Item
 }
 
+// New builds a Box laying out along direction.
 func New(direction Direction, items ...Item) *Box {
 	return &Box{direction: direction, items: items}
 }
@@ -92,9 +92,8 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-// each computes the split and hands every item the box it was given. The split
-// is recomputed per phase rather than cached from Render, so Update and Render
-// can be called in any order.
+// The split is recomputed per phase rather than cached, so Update and Render can
+// be called in any order.
 func (b *Box) each(ctx *reactea.Ctx, visit func(Item, *reactea.Ctx)) {
 	width, height := ctx.Size()
 
@@ -118,9 +117,6 @@ func (b *Box) each(ctx *reactea.Ctx, visit func(Item, *reactea.Ctx)) {
 	}
 }
 
-// distribute hands out the main axis: fixed items first, then the remainder to
-// growing items by weight. Clamping happens in a second pass, and what clamping
-// frees up is shared among the items that are still free to move.
 func distribute(total int, items []Item) []int {
 	sizes := make([]int, len(items))
 
@@ -157,9 +153,7 @@ func distribute(total int, items []Item) []int {
 }
 
 func share(sizes []int, items []Item, grow []int, remaining, weight int) {
-	// Largest-remainder apportionment: hand out the floor of each share, then
-	// give the leftover cells to the items with the biggest fractional part, so
-	// the sizes always add up to remaining.
+	// Largest-remainder apportionment, so the sizes always add up to remaining.
 	leftover := remaining
 	fractions := make([]int, len(items))
 
@@ -214,8 +208,8 @@ func clampSizes(sizes []int, items []Item, total int) {
 		used += sizes[i]
 	}
 
-	// Clamping can push the total off; settle the difference on whatever is
-	// still free to move, one cell at a time so nothing goes negative.
+	// Settle the difference clamping caused, one cell at a time so nothing goes
+	// negative.
 	for used > total && len(free) > 0 {
 		moved := false
 

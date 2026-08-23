@@ -7,9 +7,8 @@ import (
 )
 
 // Frame draws a lipgloss style around a component. Lipgloss counts Width and
-// Height as the outer size, so the child has to be rendered at the box minus the
-// border, padding and margin — that subtraction, and the matching cursor shift,
-// is what this saves every parent from writing.
+// Height as the outer size, so the child is rendered at the box minus border,
+// padding and margin, with its cursor shifted to match.
 type Frame struct {
 	style     lipgloss.Style
 	component reactea.Component

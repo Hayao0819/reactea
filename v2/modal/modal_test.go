@@ -9,7 +9,6 @@ import (
 	"github.com/Hayao0819/reactea/v2/modal"
 )
 
-// prompt answers with its name the first time it is asked.
 type prompt struct {
 	reactea.BasicComponent
 
@@ -124,7 +123,6 @@ func TestReturnPopsAndDeliversTheResult(t *testing.T) {
 
 	drive(t, app, stack.Push(shown)())
 
-	// Enter makes the modal return; collect what comes back out.
 	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter produced no command")
@@ -197,8 +195,6 @@ func TestFailDeliversAnError(t *testing.T) {
 	}
 }
 
-// Closing the root scope reaches every stacked modal, without the stack being
-// asked to forward anything.
 func TestRootTeardownReachesEveryModal(t *testing.T) {
 	stack := modal.New(&base{})
 
@@ -218,7 +214,6 @@ func TestRootTeardownReachesEveryModal(t *testing.T) {
 	}
 }
 
-// Dismissing one modal must not tear down the one underneath it.
 func TestDismissOnlyTearsDownTheTop(t *testing.T) {
 	stack := modal.New(&base{})
 

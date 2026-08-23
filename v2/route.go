@@ -2,8 +2,7 @@ package reactea
 
 import "strings"
 
-// Resolve turns target into an absolute route. An absolute target is returned
-// as is; a relative one is applied to base, honouring "." and "..".
+// Resolve turns target into an absolute route, honouring "." and "..".
 func Resolve(base, target string) string {
 	if target == "" {
 		return base
@@ -99,7 +98,6 @@ func MatchRoute(route string, placeholder string) (map[string]string, bool) {
 				continue
 
 			default:
-				// Out of bounds and the placeholder does not want optional data.
 				return nil, false
 			}
 		}

@@ -1,10 +1,6 @@
-// Package modal stacks blocking overlays on top of a base component.
-//
-// A modal is an ordinary Component. It is pushed onto a Stack, it receives every
-// message while it is on top, and it finishes by returning a command built with
-// Return — which pops it and delivers its answer to the rest of the tree as an
-// ordinary message. Nothing blocks: no extra goroutine, no channel handshake,
-// no chance of parking the event loop.
+// Package modal stacks blocking overlays on a base component. A modal finishes
+// with Return, which pops it and delivers its answer as an ordinary message, so
+// nothing here blocks the event loop.
 package modal
 
 import (
@@ -18,7 +14,7 @@ type Result[T any] struct {
 	Err   error
 }
 
-// Ok reports a value.
+// Ok reports whether the modal succeeded.
 func (r Result[T]) Ok() bool { return r.Err == nil }
 
 type dismissMsg struct{}
@@ -53,12 +49,12 @@ type Stack struct {
 	modals []mounted
 }
 
+// New builds a Stack over base.
 func New(base reactea.Component) *Stack {
 	return &Stack{base: base}
 }
 
-// Push puts a modal on top. It is initialised on the next Update, so Push is
-// safe to call from anywhere.
+// The modal is initialised on the next Update, so Push is safe from anywhere.
 func (s *Stack) Push(modal reactea.Component) tea.Cmd {
 	return func() tea.Msg { return pushMsg{modal: modal} }
 }
@@ -89,8 +85,7 @@ func (s *Stack) Init(ctx *reactea.Ctx) tea.Cmd {
 func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case pushMsg:
-		// Each modal gets a scope of its own, so dismissing one runs exactly the
-		// cleanups it registered.
+		// Its own scope, so dismissing one runs exactly its cleanups.
 		scope := ctx.Scope().Child()
 		s.modals = append(s.modals, mounted{component: msg.modal, scope: scope})
 
@@ -105,8 +100,6 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	// A modal is a blocking overlay: while one is up it takes the input, and the
-	// base sees nothing.
 	if top := s.top(); top != nil {
 		return top.component.Update(ctx.WithScope(top.scope), msg)
 	}

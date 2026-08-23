@@ -21,8 +21,6 @@ func TestFramedShrinksTheChild(t *testing.T) {
 	}
 }
 
-// Lipgloss counts Width/Height as the outer size, so a framed child still fits
-// the box the parent handed out.
 func TestFramedFillsItsBox(t *testing.T) {
 	framed := Framed(lipgloss.NewStyle().Border(lipgloss.NormalBorder()), &probe{label: "x"})
 
@@ -52,7 +50,6 @@ func TestFramedTranslatesCursor(t *testing.T) {
 	}
 }
 
-// A frame inside a box has to stack both offsets.
 func TestFramedInsideColumn(t *testing.T) {
 	child := &probe{label: "x", wantsCursor: true}
 

@@ -44,7 +44,6 @@ func TestReactifyWidget(t *testing.T) {
 	}
 }
 
-// A widget drawing its own virtual cursor reports none, and the view is clean.
 func TestReactifyWidgetVirtualCursor(t *testing.T) {
 	input := textinput.New()
 	input.Focus()
@@ -56,8 +55,6 @@ func TestReactifyWidgetVirtualCursor(t *testing.T) {
 	}
 }
 
-// The widget's cursor is reported in its own coordinates, so a parent that
-// insets it gets the translation for free.
 func TestReactifyWidgetCursorIsTranslated(t *testing.T) {
 	input := textinput.New()
 	input.SetVirtualCursor(false)
@@ -94,7 +91,6 @@ func TestReactifyWidgetInitIsOptional(t *testing.T) {
 	}
 }
 
-// A whole tea.Model nests through Reactify, cursor included.
 type nestedModel struct{ text string }
 
 func (m nestedModel) Init() tea.Cmd { return nil }
