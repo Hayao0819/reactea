@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/Hayao0819/reactea"
+	"github.com/Hayao0819/reactea/examples/dynamicRoutes/data"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
-	"github.com/londek/reactea/examples/dynamicRoutes/data"
 )
 
 type Component struct {

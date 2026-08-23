@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/londek/reactea"
-	"github.com/londek/reactea/examples/dynamicRoutes/app"
+	"github.com/Hayao0819/reactea"
+	"github.com/Hayao0819/reactea/examples/dynamicRoutes/app"
 )
 
 func main() {

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/londek/reactea"
-	"github.com/londek/reactea/examples/quickstart/app"
+	"github.com/Hayao0819/reactea"
+	"github.com/Hayao0819/reactea/examples/quickstart/app"
 )
 
 func main() {

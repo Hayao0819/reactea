@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Hayao0819/reactea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
 )
 
 // promptModal is a minimal modal that returns its name when Enter is pressed.

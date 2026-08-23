@@ -3,8 +3,8 @@ package modal
 import (
 	"sync"
 
+	"github.com/Hayao0819/reactea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
 )
 
 // Controller drives a modal flow. The flow itself is written imperatively in

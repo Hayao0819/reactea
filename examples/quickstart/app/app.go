@@ -1,12 +1,12 @@
 package app
 
 import (
+	"github.com/Hayao0819/reactea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
 
-	"github.com/londek/reactea/examples/quickstart/pages/displayname"
-	"github.com/londek/reactea/examples/quickstart/pages/input"
-	"github.com/londek/reactea/router"
+	"github.com/Hayao0819/reactea/examples/quickstart/pages/displayname"
+	"github.com/Hayao0819/reactea/examples/quickstart/pages/input"
+	"github.com/Hayao0819/reactea/router"
 )
 
 type Component struct {

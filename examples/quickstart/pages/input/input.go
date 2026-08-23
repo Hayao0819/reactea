@@ -3,9 +3,9 @@ package input
 import (
 	"fmt"
 
+	"github.com/Hayao0819/reactea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
 )
 
 type Component struct {

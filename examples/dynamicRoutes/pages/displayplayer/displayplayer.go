@@ -3,7 +3,7 @@ package displayplayer
 import (
 	"fmt"
 
-	"github.com/londek/reactea/examples/dynamicRoutes/data"
+	"github.com/Hayao0819/reactea/examples/dynamicRoutes/data"
 )
 
 type Props = int

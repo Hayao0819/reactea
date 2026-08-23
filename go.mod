@@ -1,4 +1,4 @@
-module github.com/londek/reactea
+module github.com/Hayao0819/reactea
 
 go 1.23.0
 

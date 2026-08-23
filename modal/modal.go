@@ -1,8 +1,8 @@
 package modal
 
 import (
+	"github.com/Hayao0819/reactea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
 )
 
 type Modal[T any] struct {

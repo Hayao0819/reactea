@@ -2,11 +2,11 @@
 
 <div align="center">
 
-[![Latest](https://img.shields.io/github/v/tag/londek/reactea?label=latest)](https://img.shields.io/github/v/tag/londek/reactea?label=latest)
-[![build](https://github.com/londek/reactea/actions/workflows/build.yml/badge.svg)](https://github.com/londek/reactea/actions/workflows/build.yml)
+[![Latest](https://img.shields.io/github/v/tag/Hayao0819/reactea?label=latest)](https://img.shields.io/github/v/tag/Hayao0819/reactea?label=latest)
+[![build](https://github.com/Hayao0819/reactea/actions/workflows/build.yml/badge.svg)](https://github.com/Hayao0819/reactea/actions/workflows/build.yml)
 ![Codecov](https://img.shields.io/codecov/c/github/Londek/reactea)
-[![Go Reference](https://pkg.go.dev/badge/github.com/londek/reactea.svg)](https://pkg.go.dev/github.com/londek/reactea)
-[![Go Report Card](https://goreportcard.com/badge/github.com/londek/reactea)](https://goreportcard.com/report/github.com/londek/reactea)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Hayao0819/reactea.svg)](https://pkg.go.dev/github.com/Hayao0819/reactea)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Hayao0819/reactea)](https://goreportcard.com/report/github.com/Hayao0819/reactea)
 
 <p align="center">With the release of bubbletea v2 I'm archiving this project - it's not actively maintained anymore</p>
 
@@ -17,7 +17,7 @@ For me, personally - **It's a must** in project with multiple pages and componen
 
 Check our quickstart [right here](#quickstart) or other examples [here!](/examples)
 
-`go get -u github.com/londek/reactea`
+`go get -u github.com/Hayao0819/reactea`
 </div>
 
 ## General info

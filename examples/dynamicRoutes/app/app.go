@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/Hayao0819/reactea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
 
-	"github.com/londek/reactea/examples/dynamicRoutes/pages/displayplayer"
-	"github.com/londek/reactea/examples/dynamicRoutes/pages/input"
-	"github.com/londek/reactea/router"
+	"github.com/Hayao0819/reactea/examples/dynamicRoutes/pages/displayplayer"
+	"github.com/Hayao0819/reactea/examples/dynamicRoutes/pages/input"
+	"github.com/Hayao0819/reactea/router"
 )
 
 type Component struct {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Hayao0819/reactea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/londek/reactea"
 )
 
 type testComponenent struct {
