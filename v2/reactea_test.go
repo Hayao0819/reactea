@@ -366,3 +366,36 @@ func TestProgressBarAndBracketedPaste(t *testing.T) {
 		t.Error("bracketed paste was not restored")
 	}
 }
+
+func TestInputCaptureNests(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+
+	if app.InputCaptured() {
+		t.Fatal("input was captured before anything asked")
+	}
+
+	app.Update(reactea.CaptureInput())
+	app.Update(reactea.CaptureInput())
+
+	if !app.Ctx().InputCaptured() {
+		t.Error("the Ctx did not see the capture")
+	}
+
+	app.Update(reactea.ReleaseInput())
+
+	if !app.InputCaptured() {
+		t.Error("one release cleared two captures")
+	}
+
+	app.Update(reactea.ReleaseInput())
+
+	if app.InputCaptured() {
+		t.Error("the capture was not released")
+	}
+
+	app.Update(reactea.ReleaseInput())
+
+	if app.InputCaptured() {
+		t.Error("an unbalanced release went negative")
+	}
+}

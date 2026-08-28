@@ -267,3 +267,23 @@ func TestDataReachesTheBaseWhileAModalIsUp(t *testing.T) {
 		t.Error("input reached the base while a modal was up")
 	}
 }
+
+func TestAModalCapturesInput(t *testing.T) {
+	stack := modal.New(&base{})
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+
+	app.Init()
+
+	drive(t, app, stack.Push(&prompt{name: "x"})())
+
+	if !app.InputCaptured() {
+		t.Error("a modal did not capture the input")
+	}
+
+	drive(t, app, modal.Dismiss())
+
+	if app.InputCaptured() {
+		t.Error("dismissing the modal did not release the input")
+	}
+}

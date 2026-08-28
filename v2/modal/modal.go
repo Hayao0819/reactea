@@ -89,12 +89,16 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		scope := ctx.Scope().Child()
 		s.modals = append(s.modals, mounted{component: msg.modal, scope: scope})
 
-		return msg.modal.Init(ctx.WithScope(scope))
+		// A modal takes the keys, so the root's global keys stand down while it
+		// is up without the app having to remember.
+		return tea.Batch(msg.modal.Init(ctx.WithScope(scope)), reactea.CaptureInput)
 
 	case dismissMsg:
 		if top := s.top(); top != nil {
 			top.scope.Close()
 			s.modals = s.modals[:len(s.modals)-1]
+
+			return reactea.ReleaseInput
 		}
 
 		return nil

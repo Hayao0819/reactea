@@ -10,6 +10,17 @@ import tea "charm.land/bubbletea/v2"
 // Containers route on this distinction. It is what keeps a modal from starving
 // the page underneath it of its own results.
 
+// captureMsg moves the app's input-capture depth.
+type captureMsg struct{ delta int }
+
+// CaptureInput declares that something below is taking the keys — a text field
+// in filter mode, a modal. Global key handling at the root stands down until the
+// matching ReleaseInput. Calls nest, so they must be paired.
+func CaptureInput() tea.Msg { return captureMsg{delta: 1} }
+
+// ReleaseInput undoes one CaptureInput.
+func ReleaseInput() tea.Msg { return captureMsg{delta: -1} }
+
 // IsKeyboard reports whether msg is a key or paste event.
 func IsKeyboard(msg tea.Msg) bool {
 	switch msg.(type) {

@@ -67,18 +67,18 @@ func newRoot() *root {
 }
 
 func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
-	// Global keys are read above the tree, so they have to stand down while a
-	// modal is typing. Ctrl+C is the exception, as always.
-	if r.stack.Top() != nil {
-		if reactea.Key(msg, "ctrl+c") {
-			return tea.Quit
-		}
+	// Global keys are read above the tree, so they stand down while something
+	// below is taking the keys. Ctrl+C is the exception, as always.
+	if reactea.Key(msg, "ctrl+c") {
+		return tea.Quit
+	}
 
+	if ctx.InputCaptured() {
 		return r.Wrapper.Update(ctx, msg)
 	}
 
 	switch {
-	case reactea.Key(msg, "q", "ctrl+c"):
+	case reactea.Key(msg, "q"):
 		return tea.Quit
 	case reactea.Key(msg, "c"):
 		return r.stack.Push(newCompose())

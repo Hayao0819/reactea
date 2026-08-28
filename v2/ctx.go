@@ -74,6 +74,10 @@ func (c *Ctx) Route() string { return c.app.route }
 // PreviousRoute is where the app was before the last route change.
 func (c *Ctx) PreviousRoute() string { return c.app.previousRoute }
 
+// InputCaptured reports whether something below has claimed the keys, so a
+// component reading global keys knows to stand down.
+func (c *Ctx) InputCaptured() bool { return c.app.InputCaptured() }
+
 // SetRoute moves to an absolute route when the returned command runs, so it is
 // safe to call from any goroutine.
 func (c *Ctx) SetRoute(target string) tea.Cmd {

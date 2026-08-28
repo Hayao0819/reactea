@@ -181,6 +181,27 @@ end so the caller decides how to wrap. A component reads `ctx.Focused()` to styl
 itself, and **only a focused component may set the cursor** — one cursor per frame
 falls out of the focus rules instead of being a race between siblings.
 
+Global keys are read above the tree, so they have to stand down while something
+below is typing. A component that takes the keys says so, and the root asks:
+
+```go
+// entering filter mode
+return reactea.CaptureInput
+
+// leaving it
+return reactea.ReleaseInput
+
+func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+    if ctx.InputCaptured() {
+        return r.body.Update(ctx, msg)
+    }
+    ...
+}
+```
+
+`modal.Stack` captures and releases on its own, so a modal needs nothing from the
+app. Calls nest, so a capture must be paired with a release.
+
 Mouse events arrive with box-local coordinates, so a click is `msg.Y` rows into
 your own pane. A press also moves the focus to what was pressed; a wheel or a
 motion leaves it alone.

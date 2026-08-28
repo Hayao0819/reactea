@@ -36,6 +36,7 @@ type App struct {
 	terminal tea.View
 	cursor   *tea.Cursor
 
+	captures int
 	tornDown bool
 
 	width, height int
@@ -111,6 +112,9 @@ func (a *App) Run(options ...tea.ProgramOption) error {
 // Route is the app's current route.
 func (a *App) Route() string { return a.route }
 
+// InputCaptured reports whether something below has claimed the keys.
+func (a *App) InputCaptured() bool { return a.captures > 0 }
+
 // Scope is the app's root scope. It closes when the program ends.
 func (a *App) Scope() *Scope { return a.scope }
 
@@ -177,6 +181,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case terminalMsg:
 		msg.apply(&a.terminal)
+
+		return a, nil
+
+	case captureMsg:
+		a.captures = max(0, a.captures+msg.delta)
 
 		return a, nil
 
