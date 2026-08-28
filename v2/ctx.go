@@ -68,6 +68,17 @@ func (c *Ctx) Scope() *Scope { return c.scope }
 // OnDestroy registers a cleanup with this Ctx's scope.
 func (c *Ctx) OnDestroy(cleanup func()) { c.scope.OnDestroy(cleanup) }
 
+// CaptureInput claims the keys until this Ctx's scope closes, so a page routed
+// away from mid-typing cannot leave the global keys dead. The package-level
+// CaptureInput is the unscoped form and has to be paired by hand.
+func (c *Ctx) CaptureInput() tea.Cmd {
+	held := &capture{app: c.app}
+
+	c.scope.OnDestroy(held.release)
+
+	return func() tea.Msg { return captureMsg{delta: 1, held: held} }
+}
+
 // Route is the app's current route.
 func (c *Ctx) Route() string { return c.app.route }
 

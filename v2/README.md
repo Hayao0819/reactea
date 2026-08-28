@@ -133,9 +133,13 @@ layout.Column(
 )
 ```
 
-`Fixed` takes exactly that many cells, `Grow` takes a share of what is left
-weighted against the other growing items, and `Bounded` is `Grow` with a floor
-and a ceiling. Every cell is handed out: the remainder from an uneven split goes
+`Box` pads or trims each child to the box it was given, so a child that renders
+short or long shifts nothing else. `Frame` does the same for its outer size.
+
+`Fixed` takes exactly that many cells — `Fixed(0, c)` is flexible, not hidden —
+`Grow` takes a share of what is left weighted against the other growing items,
+and `Bounded` is `Grow` with a floor and a ceiling that the split honours only
+while there is room for it. Every cell is handed out: the remainder from an uneven split goes
 to the items with the largest fractional share, so three `Grow(1, …)` items in a
 10-cell box get 4, 3 and 3.
 
@@ -175,6 +179,16 @@ func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
     return r.body.Update(ctx, msg)
 }
 ```
+
+A `Box` with nothing focusable in it drops keyboard messages, so a component that
+expects keys must be marked `Focusable()` — otherwise it also never gets the
+cursor, since only a focused component may set one.
+
+Capturing and focus are separate mechanisms: `CaptureInput` silences the root's
+global keys, it does not redirect them. Whatever captures must hold the focus
+too, or the keys go elsewhere. `ctx.CaptureInput()` ties the claim to the Ctx's
+scope, so a page routed away from mid-typing releases it automatically; the
+package-level `reactea.CaptureInput` is the unscoped form and must be paired.
 
 `FocusNext` descends into a nested box before advancing, and reports false at the
 end so the caller decides how to wrap. A component reads `ctx.Focused()` to style

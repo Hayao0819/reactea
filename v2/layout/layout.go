@@ -263,6 +263,20 @@ func (b *Box) routeMouse(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	return b.items[hit].Component.Update(hitCtx, reactea.TranslateMouse(msg, -offset.x, -offset.y))
 }
 
+// fit pads or trims a child's render to the box it was given. Joining unfitted
+// strings would shift its neighbours, and hit-testing would then disagree with
+// what is on screen.
+func fit(content string, width, height int) string {
+	if actual, rows := lipgloss.Size(content); actual == width && rows == height {
+		return content
+	}
+
+	return lipgloss.NewStyle().
+		Width(width).Height(height).
+		MaxWidth(width).MaxHeight(height).
+		Render(content)
+}
+
 type point struct{ x, y int }
 
 // local turns a coordinate in this box's space into the child's.
@@ -277,7 +291,9 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 	rendered := make([]string, 0, len(b.items))
 
 	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
-		rendered = append(rendered, item.Component.Render(childCtx))
+		width, height := childCtx.Size()
+
+		rendered = append(rendered, fit(item.Component.Render(childCtx), width, height))
 	})
 
 	if b.direction == Vertical {

@@ -116,3 +116,39 @@ func TestWhenFocusedSwapsTheStyle(t *testing.T) {
 		t.Errorf("the focused style was used while blurred:\n%s", blurred)
 	}
 }
+
+func TestFrameDropsClicksOnItsBorder(t *testing.T) {
+	child := &probe{label: "x"}
+
+	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+
+	app := reactea.New(
+		Column(Grow(1, Framed(style, child)).Focusable()),
+		reactea.WithSize(20, 6),
+	)
+
+	app.Init()
+
+	for _, y := range []int{0, 5} {
+		app.Update(tea.MouseClickMsg{X: 5, Y: y, Button: tea.MouseLeft})
+	}
+
+	if child.updates != 0 {
+		t.Errorf("the child saw %d border clicks", child.updates)
+	}
+
+	app.Update(tea.MouseClickMsg{X: 5, Y: 2, Button: tea.MouseLeft})
+
+	if child.updates != 1 {
+		t.Errorf("a click inside the frame did not reach the child (%d)", child.updates)
+	}
+
+	click, ok := child.messages[0].(tea.MouseClickMsg)
+	if !ok {
+		t.Fatalf("got %T", child.messages[0])
+	}
+
+	if click.X != 4 || click.Y != 1 {
+		t.Errorf("coordinates = (%d, %d), want the child's own space", click.X, click.Y)
+	}
+}

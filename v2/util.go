@@ -21,7 +21,14 @@ func (c *Reactified[TModel]) Init(*Ctx) tea.Cmd {
 	return c.Model.Init()
 }
 
-func (c *Reactified[TModel]) Update(_ *Ctx, msg tea.Msg) tea.Cmd {
+func (c *Reactified[TModel]) Update(ctx *Ctx, msg tea.Msg) tea.Cmd {
+	// The app broadcasts the terminal's size; a nested model must be told its own
+	// box instead, or it draws as if it owned the screen.
+	if _, ok := msg.(tea.WindowSizeMsg); ok {
+		width, height := ctx.Size()
+		msg = tea.WindowSizeMsg{Width: width, Height: height}
+	}
+
 	updated, cmd := c.Model.Update(msg)
 
 	// Value receivers: the returned value has to be stored back or state is lost.

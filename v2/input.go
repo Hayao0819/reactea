@@ -10,8 +10,27 @@ import tea "charm.land/bubbletea/v2"
 // Containers route on this distinction. It is what keeps a modal from starving
 // the page underneath it of its own results.
 
-// captureMsg moves the app's input-capture depth.
-type captureMsg struct{ delta int }
+// captureMsg moves the app's input-capture depth. held, when set, is what the
+// scope releases later.
+type captureMsg struct {
+	delta int
+	held  *capture
+}
+
+// capture is one scope-bound claim on the keys.
+type capture struct {
+	app  *App
+	held bool
+}
+
+func (c *capture) release() {
+	if !c.held {
+		return
+	}
+
+	c.held = false
+	c.app.captures = max(0, c.app.captures-1)
+}
 
 // CaptureInput declares that something below is taking the keys — a text field
 // in filter mode, a modal. Global key handling at the root stands down until the

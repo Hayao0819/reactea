@@ -399,3 +399,37 @@ func TestInputCaptureNests(t *testing.T) {
 		t.Error("an unbalanced release went negative")
 	}
 }
+
+func TestScopedCaptureIsReleasedWithItsScope(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+
+	page := app.Scope().Child()
+
+	app.Update(app.Ctx().WithScope(page).CaptureInput()())
+
+	if !app.InputCaptured() {
+		t.Fatal("the capture did not take")
+	}
+
+	page.Close()
+
+	if app.InputCaptured() {
+		t.Error("closing the scope did not release the capture")
+	}
+}
+
+func TestAScopedCaptureThatNeverRanIsNotReleased(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+
+	app.Update(reactea.CaptureInput())
+
+	page := app.Scope().Child()
+
+	app.Ctx().WithScope(page).CaptureInput() // built, never run
+
+	page.Close()
+
+	if !app.InputCaptured() {
+		t.Error("an unused scoped capture released someone else's claim")
+	}
+}

@@ -38,6 +38,12 @@ func (f *Frame) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		innerX, innerY := inner.Origin()
 
 		msg = reactea.TranslateMouse(msg, innerX-outerX, innerY-outerY)
+
+		// A click on the border is not a click on the child. Box hit-tests before
+		// it routes, so dropping here keeps the two containers consistent.
+		if _, _, inside := reactea.Mouse(inner, msg); !inside {
+			return nil
+		}
 	}
 
 	return f.component.Update(inner, msg)
@@ -74,7 +80,12 @@ func (noFocus) HasFocusable() bool { return false }
 func (f *Frame) Render(ctx *reactea.Ctx) string {
 	width, height := ctx.Size()
 
-	return f.current(ctx).Width(width).Height(height).Render(f.component.Render(f.inner(ctx)))
+	// Width and Height only pad; MaxWidth and MaxHeight are what hold the frame
+	// to the box when the child overruns it.
+	return f.current(ctx).
+		Width(width).Height(height).
+		MaxWidth(width).MaxHeight(height).
+		Render(f.component.Render(f.inner(ctx)))
 }
 
 func (f *Frame) current(ctx *reactea.Ctx) lipgloss.Style {

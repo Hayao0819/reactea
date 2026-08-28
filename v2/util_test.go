@@ -1,6 +1,7 @@
 package reactea_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -126,5 +127,49 @@ func TestReactify(t *testing.T) {
 
 	if view.Cursor == nil || view.Cursor.X != 2 {
 		t.Errorf("cursor = %+v", view.Cursor)
+	}
+}
+
+type sizeAwareModel struct{ width, height int }
+
+func (m sizeAwareModel) Init() tea.Cmd { return nil }
+
+func (m sizeAwareModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = size.Width, size.Height
+	}
+
+	return m, nil
+}
+
+func (m sizeAwareModel) View() tea.View {
+	return tea.NewView(fmt.Sprintf("%dx%d", m.width, m.height))
+}
+
+// pane insets its child to a fixed box, the way a layout container would.
+type pane struct {
+	reactea.BasicComponent
+
+	child reactea.Component
+}
+
+func (p *pane) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	return p.child.Update(p.box(ctx), msg)
+}
+
+func (p *pane) Render(ctx *reactea.Ctx) string { return p.child.Render(p.box(ctx)) }
+
+func (p *pane) box(ctx *reactea.Ctx) *reactea.Ctx { return ctx.Inset(0, 0, 10, 4) }
+
+func TestReactifyTellsTheModelItsOwnBox(t *testing.T) {
+	app := reactea.New(
+		&pane{child: reactea.Reactify[tea.Model](sizeAwareModel{})},
+		reactea.WithSize(80, 24),
+	)
+
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	if got := app.View().Content; got != "10x4" {
+		t.Errorf("content = %q, want the model's own box", got)
 	}
 }

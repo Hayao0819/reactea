@@ -187,6 +187,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case captureMsg:
 		a.captures = max(0, a.captures+msg.delta)
 
+		if msg.held != nil {
+			msg.held.held = true
+		}
+
 		return a, nil
 
 	case tea.WindowSizeMsg:
