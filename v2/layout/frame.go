@@ -15,6 +15,9 @@ type Frame struct {
 	component reactea.Component
 }
 
+// SetStyle changes the frame drawn around the component.
+func (f *Frame) SetStyle(style lipgloss.Style) { f.style = style }
+
 // WhenFocused draws the frame in another style while the component inside holds
 // the focus, which is how a multi-pane UI shows where the keys are going.
 func (f *Frame) WhenFocused(style lipgloss.Style) *Frame {

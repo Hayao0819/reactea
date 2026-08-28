@@ -35,6 +35,9 @@ func (i Item) Focusable() Item {
 	return i
 }
 
+// IsFocusable reports what Focusable set, for code that rebuilds an item list.
+func (i Item) IsFocusable() bool { return i.focusable }
+
 // Fixed gives the child exactly size cells on the main axis.
 func Fixed(size int, component reactea.Component) Item {
 	return Item{Component: component, Size: size}
@@ -79,6 +82,33 @@ func New(direction Direction, items ...Item) *Box {
 	box.FocusFirst()
 
 	return box
+}
+
+// Items is what the box currently lays out.
+func (b *Box) Items() []Item { return b.items }
+
+// SetItems replaces the children, which is how a pane is hidden, maximised or
+// reordered without rebuilding the tree and losing everyone's state. The focus
+// stays on the same component when it is still there.
+func (b *Box) SetItems(items ...Item) {
+	var focused reactea.Component
+
+	if b.focused >= 0 && b.focused < len(b.items) {
+		focused = b.items[b.focused].Component
+	}
+
+	b.items = items
+	b.focused = -1
+
+	for i := range items {
+		if items[i].Component == focused && b.takesFocus(i) {
+			b.focused = i
+
+			return
+		}
+	}
+
+	b.FocusFirst()
 }
 
 // Focused is the index of the item holding the focus, or -1.
@@ -422,12 +452,14 @@ func clampSizes(sizes []int, items []Item, total int) {
 	}
 
 	// Settle the difference clamping caused, one cell at a time so nothing goes
-	// negative.
+	// negative and nothing is pushed below the Min it asked for. When even that
+	// leaves the items over the total, the box is simply too small: Ctx.Inset
+	// clamps the overflow away, and the items nearest the end lose out.
 	for used > total && len(free) > 0 {
 		moved := false
 
 		for _, i := range free {
-			if sizes[i] > 0 {
+			if sizes[i] > items[i].Min && sizes[i] > 0 {
 				sizes[i]--
 				used--
 				moved = true

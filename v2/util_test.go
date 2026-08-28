@@ -173,3 +173,30 @@ func TestReactifyTellsTheModelItsOwnBox(t *testing.T) {
 		t.Errorf("content = %q, want the model's own box", got)
 	}
 }
+
+func TestReactifyWidgetResizesToItsBox(t *testing.T) {
+	resizes := 0
+
+	widget := reactea.ReactifyWidget(viewport.New()).
+		OnResize(func(v viewport.Model, w, h int) viewport.Model {
+			resizes++
+			v.SetWidth(w)
+			v.SetHeight(h)
+
+			return v
+		})
+
+	app := reactea.New(&pane{child: widget}, reactea.WithSize(80, 24))
+
+	app.View()
+
+	if widget.Widget.Width() != 10 || widget.Widget.Height() != 4 {
+		t.Errorf("widget = %dx%d, want its own box", widget.Widget.Width(), widget.Widget.Height())
+	}
+
+	app.View()
+
+	if resizes != 1 {
+		t.Errorf("resize ran %d times for an unchanged box", resizes)
+	}
+}

@@ -65,12 +65,32 @@ type Widget[T any] interface {
 type ReactifiedWidget[TWidget Widget[TWidget]] struct {
 	BasicComponent
 
+	resize func(TWidget, int, int) TWidget
+	width  int
+	height int
+
 	Widget TWidget
 }
 
 // ReactifyWidget wraps a bubbles widget as a Component.
 func ReactifyWidget[TWidget Widget[TWidget]](widget TWidget) *ReactifiedWidget[TWidget] {
 	return &ReactifiedWidget[TWidget]{Widget: widget}
+}
+
+// OnResize is how a widget learns the size of the box it is drawn into. Widgets
+// spell their setters differently — SetWidth, Width, a field — so reactea asks
+// for a function rather than guessing.
+//
+//	reactea.ReactifyWidget(vp).OnResize(func(v viewport.Model, w, h int) viewport.Model {
+//	    v.SetWidth(w)
+//	    v.SetHeight(h)
+//
+//	    return v
+//	})
+func (c *ReactifiedWidget[TWidget]) OnResize(resize func(TWidget, int, int) TWidget) *ReactifiedWidget[TWidget] {
+	c.resize = resize
+
+	return c
 }
 
 // Only some widgets (timer, stopwatch, filepicker, progress) have an Init, which
@@ -95,6 +115,11 @@ func (c *ReactifiedWidget[TWidget]) Update(_ *Ctx, msg tea.Msg) tea.Cmd {
 // A widget exposes Cursor() separately from View(), and only once its virtual
 // cursor is off and it is focused. Reactea forces neither.
 func (c *ReactifiedWidget[TWidget]) Render(ctx *Ctx) string {
+	if width, height := ctx.Size(); c.resize != nil && (width != c.width || height != c.height) {
+		c.width, c.height = width, height
+		c.Widget = c.resize(c.Widget, width, height)
+	}
+
 	if reporter, ok := any(c.Widget).(interface{ Cursor() *tea.Cursor }); ok {
 		if cursor := reporter.Cursor(); cursor != nil {
 			ctx.SetCursor(cursor)

@@ -147,6 +147,11 @@ to the items with the largest fractional share, so three `Grow(1, …)` items in
 `Height` as the outer size, so the child is rendered at the box minus the border,
 padding and margin, and its cursor shifted to match.
 
+`Box.SetItems` replaces the children while the program runs — hiding a pane,
+maximising one, reordering them — and keeps the focus on the same component when
+it is still there. `Frame.SetStyle` does the same for a border. Neither rebuilds
+the tree, so nothing loses its state.
+
 A `Box` recomputes its split in each phase rather than caching it from the last
 `Render`, so `Update` and `Render` can be called in any order.
 
@@ -294,6 +299,17 @@ component := reactea.ReactifyWidget(input)
 
 `ReactifyWidget` stores the widget value back after every `Update`, calls the
 widget's `Init()` when it has one, and reports its cursor through the `Ctx`.
+Widgets spell their size setters differently, so tell it how:
+
+```go
+reactea.ReactifyWidget(vp).OnResize(func(v viewport.Model, w, h int) viewport.Model {
+    v.SetWidth(w)
+    v.SetHeight(h)
+
+    return v
+})
+```
+
 Widgets draw a virtual cursor into their string by default and report no real
 cursor in that mode; reactea leaves that choice to you.
 

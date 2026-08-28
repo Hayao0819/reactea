@@ -401,3 +401,44 @@ func TestEmptyNestedBoxIsNotFocusable(t *testing.T) {
 		t.Errorf("focused = %d, want 1", box.Focused())
 	}
 }
+
+func TestSettlingNeverTakesAnItemBelowItsMin(t *testing.T) {
+	sizes := distribute(10, []Item{
+		Bounded(1, 8, 0, &probe{label: "a"}),
+		Bounded(1, 3, 0, &probe{label: "b"}),
+	})
+
+	if sizes[1] < 3 {
+		t.Errorf("sizes = %v, the second item fell below its Min of 3", sizes)
+	}
+}
+
+func TestSetItemsKeepsTheFocusOnTheSameComponent(t *testing.T) {
+	first, second, third := &probe{label: "a"}, &probe{label: "b"}, &probe{label: "c"}
+
+	box := Row(Grow(1, first).Focusable(), Grow(1, second).Focusable())
+
+	box.FocusNext()
+
+	if box.Focused() != 1 {
+		t.Fatalf("focused = %d", box.Focused())
+	}
+
+	// Hiding the first pane must not move the focus off the second.
+	box.SetItems(Grow(1, third).Focusable(), Grow(1, second).Focusable())
+
+	if box.Focused() != 1 {
+		t.Errorf("focused = %d, want the item that kept its component", box.Focused())
+	}
+
+	// Dropping the focused component falls back to the first that can take it.
+	box.SetItems(Grow(1, third).Focusable())
+
+	if box.Focused() != 0 {
+		t.Errorf("focused = %d, want 0 after the focused item went away", box.Focused())
+	}
+
+	if len(box.Items()) != 1 {
+		t.Errorf("Items() = %d entries", len(box.Items()))
+	}
+}

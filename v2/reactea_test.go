@@ -3,6 +3,8 @@ package reactea_test
 import (
 	"bytes"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -431,5 +433,31 @@ func TestAScopedCaptureThatNeverRanIsNotReleased(t *testing.T) {
 
 	if !app.InputCaptured() {
 		t.Error("an unused scoped capture released someone else's claim")
+	}
+}
+
+func TestScopeSurvivesConcurrentRegistration(t *testing.T) {
+	scope := reactea.NewScope()
+
+	var registered atomic.Int64
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Go(func() {
+			for range 50 {
+				scope.OnDestroy(func() { registered.Add(1) })
+			}
+		})
+	}
+
+	wg.Go(scope.Close)
+
+	wg.Wait()
+
+	scope.Close()
+
+	if registered.Load() != 400 {
+		t.Errorf("%d of 400 cleanups ran", registered.Load())
 	}
 }
