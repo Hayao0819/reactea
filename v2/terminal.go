@@ -49,6 +49,17 @@ func SetForegroundColor(colour color.Color) tea.Cmd {
 	return terminalCmd(func(view *tea.View) { view.ForegroundColor = colour })
 }
 
+// SetProgressBar shows a progress bar in the terminal's progress area. Pass nil
+// to take it away.
+func SetProgressBar(bar *tea.ProgressBar) tea.Cmd {
+	return terminalCmd(func(view *tea.View) { view.ProgressBar = bar })
+}
+
+// SetBracketedPaste turns bracketed paste on or off. It is on by default.
+func SetBracketedPaste(on bool) tea.Cmd {
+	return terminalCmd(func(view *tea.View) { view.DisableBracketedPasteMode = !on })
+}
+
 // SetKeyboardEnhancements asks the terminal for richer key reporting.
 func SetKeyboardEnhancements(enhancements tea.KeyboardEnhancements) tea.Cmd {
 	return terminalCmd(func(view *tea.View) { view.KeyboardEnhancements = enhancements })

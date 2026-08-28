@@ -334,3 +334,35 @@ func TestPanickingCleanupIsIsolated(t *testing.T) {
 		t.Error("an earlier cleanup was stranded by a panicking one")
 	}
 }
+
+func TestProgressBarAndBracketedPaste(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 1))
+
+	bar := &tea.ProgressBar{State: tea.ProgressBarDefault, Value: 42}
+
+	app.Update(reactea.SetProgressBar(bar)())
+	app.Update(reactea.SetBracketedPaste(false)())
+
+	view := app.View()
+
+	if view.ProgressBar == nil || view.ProgressBar.Value != 42 {
+		t.Errorf("ProgressBar = %+v", view.ProgressBar)
+	}
+
+	if !view.DisableBracketedPasteMode {
+		t.Error("bracketed paste was not disabled")
+	}
+
+	app.Update(reactea.SetProgressBar(nil)())
+	app.Update(reactea.SetBracketedPaste(true)())
+
+	view = app.View()
+
+	if view.ProgressBar != nil {
+		t.Errorf("ProgressBar = %+v, want nil", view.ProgressBar)
+	}
+
+	if view.DisableBracketedPasteMode {
+		t.Error("bracketed paste was not restored")
+	}
+}
