@@ -7,19 +7,22 @@ permissions:
 
 jobs:
   lint:
+    strategy:
+      matrix:
+        module: [".", "v2"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout reactea
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
-          go-version: ">=1.18"
+          go-version-file: ${{ matrix.module }}/go.mod
           check-latest: true
 
       - name: Lint
-        # Its basically 3.2.0 just with schema fixes
-        uses: golangci/golangci-lint-action@5acb063f68ce921cd1e8380310270f54ccbca0e4
+        uses: golangci/golangci-lint-action@v8
         with:
-          only-new-issues: true
+          version: latest
+          working-directory: ${{ matrix.module }}
