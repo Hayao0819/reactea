@@ -53,6 +53,8 @@ func (f *Frame) FocusFirst() { f.focuser().FocusFirst() }
 
 func (f *Frame) FocusLast() { f.focuser().FocusLast() }
 
+func (f *Frame) HasFocusable() bool { return f.focuser().HasFocusable() }
+
 func (f *Frame) focuser() Focuser {
 	if child, ok := f.component.(Focuser); ok {
 		return child
@@ -63,10 +65,11 @@ func (f *Frame) focuser() Focuser {
 
 type noFocus struct{}
 
-func (noFocus) FocusNext() bool { return false }
-func (noFocus) FocusPrev() bool { return false }
-func (noFocus) FocusFirst()     {}
-func (noFocus) FocusLast()      {}
+func (noFocus) FocusNext() bool    { return false }
+func (noFocus) FocusPrev() bool    { return false }
+func (noFocus) FocusFirst()        {}
+func (noFocus) FocusLast()         {}
+func (noFocus) HasFocusable() bool { return false }
 
 func (f *Frame) Render(ctx *reactea.Ctx) string {
 	width, height := ctx.Size()

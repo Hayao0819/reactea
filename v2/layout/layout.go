@@ -58,6 +58,11 @@ type Focuser interface {
 	FocusPrev() bool
 	FocusFirst()
 	FocusLast()
+
+	// HasFocusable reports whether there is anything inside to focus. A
+	// container that holds none must not be handed the focus, or keys would
+	// vanish into it.
+	HasFocusable() bool
 }
 
 type Box struct {
@@ -151,9 +156,20 @@ func (b *Box) takesFocus(i int) bool {
 		return true
 	}
 
-	_, nested := b.items[i].Component.(Focuser)
+	nested, ok := b.items[i].Component.(Focuser)
 
-	return nested
+	return ok && nested.HasFocusable()
+}
+
+// HasFocusable implements Focuser.
+func (b *Box) HasFocusable() bool {
+	for i := range b.items {
+		if b.takesFocus(i) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Column stacks items top to bottom.

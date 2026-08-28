@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/Hayao0819/reactea/v2"
 )
 
@@ -362,5 +363,41 @@ func TestOnlyTheFocusedItemMaySetTheCursor(t *testing.T) {
 
 	if cursor == nil || cursor.X != 1 || cursor.Y != 1 {
 		t.Errorf("cursor = %+v, want the focused item's", cursor)
+	}
+}
+
+func TestDecorativeContainersAreNotFocusable(t *testing.T) {
+	meter, list := &probe{label: "m"}, &probe{label: "l"}
+
+	box := Column(
+		Grow(1, Framed(lipgloss.NewStyle(), meter)),
+		Grow(1, Framed(lipgloss.NewStyle(), list).WhenFocused(lipgloss.NewStyle())).Focusable(),
+	)
+
+	if box.Focused() != 1 {
+		t.Fatalf("focused = %d, want the only focusable item", box.Focused())
+	}
+
+	app := reactea.New(box, reactea.WithSize(20, 6))
+
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+
+	if meter.updates != 0 || list.updates != 1 {
+		t.Errorf("updates = %d, %d, want 0, 1", meter.updates, list.updates)
+	}
+}
+
+func TestEmptyNestedBoxIsNotFocusable(t *testing.T) {
+	meters := Row(Grow(1, &probe{label: "a"}), Grow(1, &probe{label: "b"}))
+	list := &probe{label: "l"}
+
+	box := Column(Grow(1, meters), Grow(1, list).Focusable())
+
+	if meters.HasFocusable() {
+		t.Error("a box with no focusable items claimed to have one")
+	}
+
+	if box.Focused() != 1 {
+		t.Errorf("focused = %d, want 1", box.Focused())
 	}
 }
