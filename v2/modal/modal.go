@@ -100,11 +100,21 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	if top := s.top(); top != nil {
+	// A modal blocks input, not data: the base keeps receiving its own ticks and
+	// async results while a modal is up, or its work would stall unfinishable.
+	if top := s.top(); top != nil && reactea.IsInput(msg) {
 		return top.component.Update(ctx.WithScope(top.scope), msg)
 	}
 
-	return s.base.Update(ctx, msg)
+	cmds := make([]tea.Cmd, 0, len(s.modals)+1)
+
+	cmds = append(cmds, s.base.Update(ctx, msg))
+
+	for _, mounted := range s.modals {
+		cmds = append(cmds, mounted.component.Update(ctx.WithScope(mounted.scope), msg))
+	}
+
+	return tea.Batch(cmds...)
 }
 
 func (s *Stack) Render(ctx *reactea.Ctx) string {

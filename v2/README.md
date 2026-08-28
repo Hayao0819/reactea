@@ -146,6 +146,58 @@ padding and margin, and its cursor shifted to match.
 A `Box` recomputes its split in each phase rather than caching it from the last
 `Render`, so `Update` and `Render` can be called in any order.
 
+## Focus and input routing
+
+Messages fall into two kinds. **Input** — keys, paste, mouse — has an addressee:
+the keyboard reaches whatever holds the focus, the mouse reaches whatever sits
+under the pointer. **Everything else** — ticks, async results, window size, route
+changes — reaches the whole tree. `IsKeyboard`, `IsMouse` and `IsInput` are
+exported so a custom container can route the same way.
+
+Mark the items that can take the focus, and let the app decide which key moves
+it:
+
+```go
+body := layout.Row(
+    layout.Fixed(20, layout.Framed(paneStyle, cpu).WhenFocused(activeStyle)).Focusable(),
+    layout.Grow(1, layout.Framed(paneStyle, procs).WhenFocused(activeStyle)).Focusable(),
+)
+
+func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+    if reactea.Key(msg, "tab") {
+        if !r.body.FocusNext() {
+            r.body.FocusFirst()
+        }
+
+        return nil
+    }
+
+    return r.body.Update(ctx, msg)
+}
+```
+
+`FocusNext` descends into a nested box before advancing, and reports false at the
+end so the caller decides how to wrap. A component reads `ctx.Focused()` to style
+itself, and **only a focused component may set the cursor** — one cursor per frame
+falls out of the focus rules instead of being a race between siblings.
+
+Mouse events arrive with box-local coordinates, so a click is `msg.Y` rows into
+your own pane. A press also moves the focus to what was pressed; a wheel or a
+motion leaves it alone.
+
+```go
+func (c *procs) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+    switch msg := msg.(type) {
+    case tea.MouseClickMsg:
+        c.selected = c.offset + msg.Y
+    case tea.MouseWheelMsg:
+        c.scroll(msg.Button)
+    }
+
+    return nil
+}
+```
+
 ## Routing
 
 ```go
@@ -178,7 +230,8 @@ func (p *Page) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 ```
 
 A modal is an ordinary component pushed onto a `modal.Stack`. While it is on top
-it takes the input and the base sees nothing; it finishes with `modal.Return` or
+it takes the input, though the base keeps receiving its own ticks and async
+results so its work can finish; it finishes with `modal.Return` or
 `modal.Fail`, which pops it and delivers a `modal.Result[T]` to the tree. Nothing
 blocks — no extra goroutine, no channel handshake. Each modal gets its own
 scope, so dismissing one runs exactly its cleanups.

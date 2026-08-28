@@ -24,6 +24,15 @@ type Item struct {
 	Grow int
 	Min  int
 	Max  int
+
+	focusable bool
+}
+
+// Focusable marks the item as something Tab can land on.
+func (i Item) Focusable() Item {
+	i.focusable = true
+
+	return i
 }
 
 // Fixed gives the child exactly size cells on the main axis.
@@ -42,14 +51,109 @@ func Bounded(weight, minimum, maximum int, component reactea.Component) Item {
 }
 
 // Box lays its items out along one axis and gives each the full cross axis.
+// Focuser is a container that can move the focus among its children. Box
+// implements it, so nested boxes hand Tab down before advancing themselves.
+type Focuser interface {
+	FocusNext() bool
+	FocusPrev() bool
+	FocusFirst()
+	FocusLast()
+}
+
 type Box struct {
 	direction Direction
 	items     []Item
+
+	focused int
 }
 
 // New builds a Box laying out along direction.
 func New(direction Direction, items ...Item) *Box {
-	return &Box{direction: direction, items: items}
+	box := &Box{direction: direction, items: items, focused: -1}
+
+	box.FocusFirst()
+
+	return box
+}
+
+// Focused is the index of the item holding the focus, or -1.
+func (b *Box) Focused() int { return b.focused }
+
+// Focus moves the focus to item index, if it can take it.
+func (b *Box) Focus(index int) bool {
+	if index < 0 || index >= len(b.items) || !b.takesFocus(index) {
+		return false
+	}
+
+	b.focused = index
+
+	if child, ok := b.items[index].Component.(Focuser); ok {
+		child.FocusFirst()
+	}
+
+	return true
+}
+
+// FocusNext moves to the next focusable leaf, descending into a nested box
+// first. It reports false when there is nothing further, which is the caller's
+// cue to wrap with FocusFirst.
+func (b *Box) FocusNext() bool { return b.step(1) }
+
+// FocusPrev is FocusNext backwards; wrap it with FocusLast.
+func (b *Box) FocusPrev() bool { return b.step(-1) }
+
+func (b *Box) step(by int) bool {
+	if b.focused >= 0 && b.focused < len(b.items) {
+		if child, ok := b.items[b.focused].Component.(Focuser); ok {
+			if (by > 0 && child.FocusNext()) || (by < 0 && child.FocusPrev()) {
+				return true
+			}
+		}
+	}
+
+	for i := b.focused + by; i >= 0 && i < len(b.items); i += by {
+		if !b.takesFocus(i) {
+			continue
+		}
+
+		b.focused = i
+
+		if child, ok := b.items[i].Component.(Focuser); ok {
+			if by > 0 {
+				child.FocusFirst()
+			} else {
+				child.FocusLast()
+			}
+		}
+
+		return true
+	}
+
+	return false
+}
+
+// FocusFirst puts the focus on the first item that can take it.
+func (b *Box) FocusFirst() {
+	b.focused = -1
+	b.step(1)
+}
+
+// FocusLast puts the focus on the last item that can take it.
+func (b *Box) FocusLast() {
+	b.focused = len(b.items)
+	b.step(-1)
+}
+
+// takesFocus reports whether item i can hold the focus itself or contains
+// something that can.
+func (b *Box) takesFocus(i int) bool {
+	if b.items[i].focusable {
+		return true
+	}
+
+	_, nested := b.items[i].Component.(Focuser)
+
+	return nested
 }
 
 // Column stacks items top to bottom.
@@ -61,27 +165,102 @@ func Row(items ...Item) *Box { return New(Horizontal, items...) }
 func (b *Box) Init(ctx *reactea.Ctx) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(b.items))
 
-	b.each(ctx, func(item Item, childCtx *reactea.Ctx) {
+	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
 		cmds = append(cmds, item.Component.Init(childCtx))
 	})
 
 	return tea.Batch(cmds...)
 }
 
+// Update routes by addressee: the keyboard reaches whatever holds the focus,
+// the mouse reaches whatever sits under the pointer, and everything else
+// reaches every item.
 func (b *Box) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if reactea.IsMouse(msg) {
+		return b.routeMouse(ctx, msg)
+	}
+
+	if reactea.IsKeyboard(msg) {
+		return b.routeKeyboard(ctx, msg)
+	}
+
 	cmds := make([]tea.Cmd, 0, len(b.items))
 
-	b.each(ctx, func(item Item, childCtx *reactea.Ctx) {
+	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
 		cmds = append(cmds, item.Component.Update(childCtx, msg))
 	})
 
 	return tea.Batch(cmds...)
 }
 
+func (b *Box) routeKeyboard(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if !ctx.Focused() || b.focused < 0 {
+		return nil
+	}
+
+	var cmd tea.Cmd
+
+	b.each(ctx, func(i int, item Item, childCtx *reactea.Ctx) {
+		if i == b.focused {
+			cmd = item.Component.Update(childCtx, msg)
+		}
+	})
+
+	return cmd
+}
+
+func (b *Box) routeMouse(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	x, y, ok := reactea.MouseAt(msg)
+	if !ok {
+		return nil
+	}
+
+	var (
+		hit    = -1
+		hitCtx *reactea.Ctx
+	)
+
+	b.each(ctx, func(i int, _ Item, childCtx *reactea.Ctx) {
+		if hit >= 0 {
+			return
+		}
+
+		width, height := childCtx.Size()
+		if local := b.local(ctx, childCtx, x, y); local.x >= 0 && local.y >= 0 && local.x < width && local.y < height {
+			hit, hitCtx = i, childCtx
+		}
+	})
+
+	if hit < 0 {
+		return nil
+	}
+
+	// A press moves the focus to whatever was pressed, the way every pointer UI
+	// behaves. A wheel or a motion leaves it alone.
+	if _, press := msg.(tea.MouseClickMsg); press && b.takesFocus(hit) {
+		b.Focus(hit)
+		hitCtx = hitCtx.WithFocus(ctx.Focused())
+	}
+
+	offset := b.local(ctx, hitCtx, 0, 0)
+
+	return b.items[hit].Component.Update(hitCtx, reactea.TranslateMouse(msg, -offset.x, -offset.y))
+}
+
+type point struct{ x, y int }
+
+// local turns a coordinate in this box's space into the child's.
+func (b *Box) local(ctx, child *reactea.Ctx, x, y int) point {
+	parentX, parentY := ctx.Origin()
+	childX, childY := child.Origin()
+
+	return point{x: x - (childX - parentX), y: y - (childY - parentY)}
+}
+
 func (b *Box) Render(ctx *reactea.Ctx) string {
 	rendered := make([]string, 0, len(b.items))
 
-	b.each(ctx, func(item Item, childCtx *reactea.Ctx) {
+	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
 		rendered = append(rendered, item.Component.Render(childCtx))
 	})
 
@@ -94,7 +273,7 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 
 // The split is recomputed per phase rather than cached, so Update and Render can
 // be called in any order.
-func (b *Box) each(ctx *reactea.Ctx, visit func(Item, *reactea.Ctx)) {
+func (b *Box) each(ctx *reactea.Ctx, visit func(int, Item, *reactea.Ctx)) {
 	width, height := ctx.Size()
 
 	main, cross := width, height
@@ -107,10 +286,12 @@ func (b *Box) each(ctx *reactea.Ctx, visit func(Item, *reactea.Ctx)) {
 	position := 0
 
 	for i, item := range b.items {
+		focused := ctx.Focused() && i == b.focused
+
 		if b.direction == Vertical {
-			visit(item, ctx.Inset(0, position, cross, sizes[i]))
+			visit(i, item, ctx.Inset(0, position, cross, sizes[i]).WithFocus(focused))
 		} else {
-			visit(item, ctx.Inset(position, 0, sizes[i], cross))
+			visit(i, item, ctx.Inset(position, 0, sizes[i], cross).WithFocus(focused))
 		}
 
 		position += sizes[i]

@@ -74,19 +74,19 @@ func TestMouseIsLocalToTheBox(t *testing.T) {
 		return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
 	}
 
-	if x, y, ok := reactea.Mouse(ctx, click(12, 5)); !ok || x != 2 || y != 1 {
+	if x, y, ok := reactea.Mouse(ctx, click(2, 1)); !ok || x != 2 || y != 1 {
 		t.Errorf("inside the box = (%d, %d, %v), want (2, 1, true)", x, y, ok)
 	}
 
-	if _, _, ok := reactea.Mouse(ctx, click(9, 5)); ok {
+	if _, _, ok := reactea.Mouse(ctx, click(-1, 1)); ok {
 		t.Error("a click left of the box was claimed")
 	}
 
-	if _, _, ok := reactea.Mouse(ctx, click(18, 5)); ok {
+	if _, _, ok := reactea.Mouse(ctx, click(8, 1)); ok {
 		t.Error("a click right of the box was claimed")
 	}
 
-	if _, _, ok := reactea.Mouse(ctx, click(12, 7)); ok {
+	if _, _, ok := reactea.Mouse(ctx, click(2, 3)); ok {
 		t.Error("a click below the box was claimed")
 	}
 

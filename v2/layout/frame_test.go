@@ -1,6 +1,7 @@
 package layout
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -56,7 +57,7 @@ func TestFramedInsideColumn(t *testing.T) {
 	framed := Framed(lipgloss.NewStyle().Border(lipgloss.NormalBorder()), child)
 
 	app := reactea.New(
-		Column(Fixed(2, &probe{label: "h"}), Grow(1, framed)),
+		Column(Fixed(2, &probe{label: "h"}), Grow(1, framed).Focusable()),
 		reactea.WithSize(20, 10),
 	)
 
@@ -92,5 +93,26 @@ func TestFramedForwardsLifecycle(t *testing.T) {
 
 	if !child.inited || child.updates != 1 || !child.destroyed {
 		t.Errorf("inited=%v updates=%d destroyed=%v", child.inited, child.updates, child.destroyed)
+	}
+}
+
+func TestWhenFocusedSwapsTheStyle(t *testing.T) {
+	plain := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	marked := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+
+	framed := Framed(plain, &probe{label: "x"}).WhenFocused(marked)
+
+	focused := reactea.New(framed, reactea.WithSize(10, 3)).View().Content
+
+	if !strings.Contains(focused, "╭") {
+		t.Errorf("the focused style was not used:\n%s", focused)
+	}
+
+	box := Column(Fixed(1, &probe{label: "h"}).Focusable(), Grow(1, framed))
+
+	blurred := reactea.New(box, reactea.WithSize(10, 4)).View().Content
+
+	if strings.Contains(blurred, "╭") {
+		t.Errorf("the focused style was used while blurred:\n%s", blurred)
 	}
 }

@@ -13,6 +13,7 @@ type Ctx struct {
 
 	x, y          int
 	width, height int
+	focused       bool
 }
 
 // Size is the box this component may draw into.
@@ -34,6 +35,20 @@ func (c *Ctx) Inset(dx, dy, width, height int) *Ctx {
 	child.x, child.y = c.x+dx, c.y+dy
 	child.width = clamp(width, 0, max(0, c.width-dx))
 	child.height = clamp(height, 0, max(0, c.height-dy))
+
+	return &child
+}
+
+// Focused reports whether this component holds the keyboard focus. Containers
+// decide it; a component reads it to style itself and to know whether keys are
+// meant for it.
+func (c *Ctx) Focused() bool { return c.focused }
+
+// WithFocus marks the child branch as holding, or not holding, the focus.
+// Containers call it as they route.
+func (c *Ctx) WithFocus(focused bool) *Ctx {
+	child := *c
+	child.focused = focused
 
 	return &child
 }
@@ -77,7 +92,14 @@ func (c *Ctx) Navigate(target string) tea.Cmd {
 // SetCursor places the cursor inside this box for this frame. It stays a render
 // concern because it depends on the layout; everything else the terminal can be
 // asked for is a command. Pass nil to hide it.
+//
+// A component without the focus is ignored, so one cursor per frame falls out of
+// the focus rules instead of being a race between siblings.
 func (c *Ctx) SetCursor(cursor *tea.Cursor) {
+	if !c.focused {
+		return
+	}
+
 	if cursor == nil {
 		c.app.cursor = nil
 

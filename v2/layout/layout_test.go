@@ -22,6 +22,8 @@ type probe struct {
 
 	cursorX, cursorY int
 	wantsCursor      bool
+
+	messages []tea.Msg
 }
 
 func (c *probe) Init(ctx *reactea.Ctx) tea.Cmd {
@@ -32,8 +34,9 @@ func (c *probe) Init(ctx *reactea.Ctx) tea.Cmd {
 	return nil
 }
 
-func (c *probe) Update(*reactea.Ctx, tea.Msg) tea.Cmd {
+func (c *probe) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	c.updates++
+	c.messages = append(c.messages, msg)
 
 	return nil
 }
@@ -53,6 +56,8 @@ func (c *probe) Render(ctx *reactea.Ctx) string {
 
 	return strings.Join(lines, "\n")
 }
+
+type tickMsg struct{}
 
 func render(box *Box, width, height int) *reactea.App {
 	app := reactea.New(box, reactea.WithSize(width, height))
@@ -158,7 +163,7 @@ func TestBoundedRespectsMinAndMax(t *testing.T) {
 func TestCursorIsTranslatedByOffset(t *testing.T) {
 	body := &probe{label: "b", wantsCursor: true, cursorX: 3, cursorY: 2}
 
-	app := render(Column(Fixed(2, &probe{label: "h"}), Grow(1, body)), 20, 10)
+	app := render(Column(Fixed(2, &probe{label: "h"}), Grow(1, body).Focusable()), 20, 10)
 
 	cursor := app.View().Cursor
 
@@ -174,7 +179,7 @@ func TestCursorIsTranslatedByOffset(t *testing.T) {
 func TestRowTranslatesCursorHorizontally(t *testing.T) {
 	main := &probe{label: "m", wantsCursor: true, cursorX: 1, cursorY: 1}
 
-	app := render(Row(Fixed(10, &probe{label: "s"}), Grow(1, main)), 40, 5)
+	app := render(Row(Fixed(10, &probe{label: "s"}), Grow(1, main).Focusable()), 40, 5)
 
 	cursor := app.View().Cursor
 
@@ -190,7 +195,7 @@ func TestUpdateSeesTheSameSplit(t *testing.T) {
 
 	app := reactea.New(box, reactea.WithSize(20, 10))
 
-	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	app.Update(tickMsg{})
 
 	if body.updates != 1 {
 		t.Fatalf("body saw %d updates", body.updates)
@@ -211,7 +216,7 @@ func TestLifecycleReachesEveryItem(t *testing.T) {
 	app := reactea.New(box, reactea.WithSize(10, 4))
 
 	app.Init()
-	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	app.Update(tickMsg{})
 	app.Scope().Close()
 
 	for _, c := range []*probe{first, second} {
@@ -232,5 +237,130 @@ func TestRenderJoinsChildren(t *testing.T) {
 
 	if lines := strings.Count(rendered, "\n"); lines != 1 {
 		t.Errorf("render has %d newlines, want 1:\n%q", lines, rendered)
+	}
+}
+
+func keys(box *Box, app *reactea.App, presses ...string) {
+	for _, key := range presses {
+		app.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+	}
+}
+
+func TestKeyboardOnlyReachesTheFocusedItem(t *testing.T) {
+	left, right := &probe{label: "l"}, &probe{label: "r"}
+
+	box := Row(Grow(1, left).Focusable(), Grow(1, right).Focusable())
+
+	app := reactea.New(box, reactea.WithSize(20, 4))
+
+	keys(box, app, "x")
+
+	if left.updates != 1 || right.updates != 0 {
+		t.Errorf("updates = %d, %d, want 1, 0", left.updates, right.updates)
+	}
+
+	box.FocusNext()
+	keys(box, app, "x")
+
+	if left.updates != 1 || right.updates != 1 {
+		t.Errorf("after FocusNext updates = %d, %d, want 1, 1", left.updates, right.updates)
+	}
+}
+
+func TestFocusSkipsItemsThatCannotTakeIt(t *testing.T) {
+	header, body := &probe{label: "h"}, &probe{label: "b"}
+
+	box := Column(Fixed(1, header), Grow(1, body).Focusable())
+
+	if box.Focused() != 1 {
+		t.Errorf("focused = %d, want 1", box.Focused())
+	}
+
+	if box.FocusNext() {
+		t.Error("FocusNext ran past the end and reported success")
+	}
+}
+
+func TestFocusDescendsIntoNestedBoxes(t *testing.T) {
+	a, b, c := &probe{label: "a"}, &probe{label: "b"}, &probe{label: "c"}
+
+	inner := Column(Grow(1, b).Focusable(), Grow(1, c).Focusable())
+	outer := Row(Grow(1, a).Focusable(), Grow(1, inner))
+
+	app := reactea.New(outer, reactea.WithSize(20, 4))
+
+	seen := []int{}
+
+	for {
+		app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+		seen = append(seen, a.updates+b.updates+c.updates)
+
+		if !outer.FocusNext() {
+			break
+		}
+	}
+
+	if a.updates != 1 || b.updates != 1 || c.updates != 1 {
+		t.Errorf("updates = %d, %d, %d, want 1, 1, 1 (seen %v)", a.updates, b.updates, c.updates, seen)
+	}
+}
+
+func TestMouseGoesToTheBoxUnderThePointer(t *testing.T) {
+	left, right := &probe{label: "l"}, &probe{label: "r"}
+
+	box := Row(Grow(1, left).Focusable(), Grow(1, right).Focusable())
+
+	app := reactea.New(box, reactea.WithSize(20, 4))
+
+	app.Update(tea.MouseClickMsg{X: 15, Y: 2, Button: tea.MouseLeft})
+
+	if right.updates != 1 || left.updates != 0 {
+		t.Fatalf("updates = %d, %d, want 0, 1", left.updates, right.updates)
+	}
+
+	click, ok := right.messages[0].(tea.MouseClickMsg)
+	if !ok {
+		t.Fatalf("got %T", right.messages[0])
+	}
+
+	if click.X != 5 || click.Y != 2 {
+		t.Errorf("coordinates = (%d, %d), want (5, 2) in the box's own space", click.X, click.Y)
+	}
+
+	if box.Focused() != 1 {
+		t.Errorf("a press did not move the focus: %d", box.Focused())
+	}
+}
+
+func TestWheelDoesNotMoveTheFocus(t *testing.T) {
+	left, right := &probe{label: "l"}, &probe{label: "r"}
+
+	box := Row(Grow(1, left).Focusable(), Grow(1, right).Focusable())
+
+	app := reactea.New(box, reactea.WithSize(20, 4))
+
+	app.Update(tea.MouseWheelMsg{X: 15, Y: 2})
+
+	if right.updates != 1 {
+		t.Errorf("the wheel did not reach the box under the pointer")
+	}
+
+	if box.Focused() != 0 {
+		t.Errorf("the wheel moved the focus to %d", box.Focused())
+	}
+}
+
+func TestOnlyTheFocusedItemMaySetTheCursor(t *testing.T) {
+	left := &probe{label: "l", wantsCursor: true, cursorX: 1, cursorY: 1}
+	right := &probe{label: "r", wantsCursor: true, cursorX: 2, cursorY: 2}
+
+	box := Row(Grow(1, left).Focusable(), Grow(1, right).Focusable())
+
+	app := reactea.New(box, reactea.WithSize(20, 4))
+
+	cursor := app.View().Cursor
+
+	if cursor == nil || cursor.X != 1 || cursor.Y != 1 {
+		t.Errorf("cursor = %+v, want the focused item's", cursor)
 	}
 }

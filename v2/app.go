@@ -116,7 +116,7 @@ func (a *App) Scope() *Scope { return a.scope }
 
 // Ctx is the root context: the whole screen, bound to the root scope.
 func (a *App) Ctx() *Ctx {
-	return &Ctx{app: a, scope: a.scope, width: a.width, height: a.height}
+	return &Ctx{app: a, scope: a.scope, width: a.width, height: a.height, focused: true}
 }
 
 func (a *App) setRoute(target string) (RouteChangedMsg, bool) {

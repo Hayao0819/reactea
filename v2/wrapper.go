@@ -36,19 +36,15 @@ func Key(msg tea.Msg, keys ...string) bool {
 	return false
 }
 
-// Mouse reports whether msg is a mouse event inside this component's box, and
-// where it landed in the box's own coordinates.
+// Mouse reports whether msg is a mouse event inside this component's box.
+// Containers translate as they route, so the coordinates are already box-local.
 func Mouse(ctx *Ctx, msg tea.Msg) (x, y int, ok bool) {
-	mouse, isMouse := msg.(tea.MouseMsg)
-	if !isMouse {
+	x, y, ok = MouseAt(msg)
+	if !ok {
 		return 0, 0, false
 	}
 
-	event := mouse.Mouse()
-	originX, originY := ctx.Origin()
 	width, height := ctx.Size()
-
-	x, y = event.X-originX, event.Y-originY
 
 	return x, y, x >= 0 && y >= 0 && x < width && y < height
 }

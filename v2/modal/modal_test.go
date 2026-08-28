@@ -240,3 +240,30 @@ func TestDismissOnlyTearsDownTheTop(t *testing.T) {
 		t.Error("the modal below did not come back to the top")
 	}
 }
+
+type tickMsg struct{}
+
+func TestDataReachesTheBaseWhileAModalIsUp(t *testing.T) {
+	page := &base{}
+	stack := modal.New(page)
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+
+	app.Init()
+
+	drive(t, app, stack.Push(&prompt{name: "x"})())
+
+	before := page.seen
+
+	app.Update(tickMsg{})
+
+	if page.seen != before+1 {
+		t.Error("the base was starved of a data message while a modal was up")
+	}
+
+	app.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+
+	if page.seen != before+1 {
+		t.Error("input reached the base while a modal was up")
+	}
+}

@@ -16,8 +16,9 @@ import (
 )
 
 var (
-	headerStyle = lipgloss.NewStyle().Bold(true).Reverse(true)
-	paneStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	headerStyle  = lipgloss.NewStyle().Bold(true).Reverse(true)
+	paneStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	focusedStyle = paneStyle.BorderForeground(lipgloss.Color("6"))
 )
 
 func main() {
@@ -37,6 +38,7 @@ type root struct {
 	reactea.Wrapper
 
 	stack *modal.Stack
+	body  *layout.Box
 }
 
 func newRoot() *root {
@@ -48,26 +50,40 @@ func newRoot() *root {
 
 	pages.NotFound = func(ctx *reactea.Ctx) string { return "no page at " + ctx.Route() }
 
-	stack := modal.New(layout.Column(
+	body := layout.Column(
 		layout.Fixed(1, reactea.Func(func(ctx *reactea.Ctx) string {
 			return headerStyle.Width(ctx.Width()).Render(" reactea tour  " + ctx.Route())
 		})),
 		layout.Grow(1, layout.Row(
-			layout.Bounded(1, 12, 20, layout.Framed(paneStyle, newSidebar())),
-			layout.Grow(3, layout.Framed(paneStyle, pages)),
+			layout.Bounded(1, 12, 20, layout.Framed(paneStyle, newSidebar()).WhenFocused(focusedStyle)).Focusable(),
+			layout.Grow(3, layout.Framed(paneStyle, pages).WhenFocused(focusedStyle)).Focusable(),
 		)),
-		layout.Fixed(1, reactea.Text(" tab compose · q quit")),
-	))
+		layout.Fixed(1, reactea.Text(" tab focus · c compose · q quit")),
+	)
 
-	return &root{Wrapper: reactea.Wrap(stack), stack: stack}
+	stack := modal.New(body)
+
+	return &root{Wrapper: reactea.Wrap(stack), stack: stack, body: body}
 }
 
 func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	switch {
 	case reactea.Key(msg, "q", "ctrl+c"):
 		return tea.Quit
-	case reactea.Key(msg, "tab"):
+	case reactea.Key(msg, "c"):
 		return r.stack.Push(newCompose())
+	case reactea.Key(msg, "tab"):
+		if !r.body.FocusNext() {
+			r.body.FocusFirst()
+		}
+
+		return nil
+	case reactea.Key(msg, "shift+tab"):
+		if !r.body.FocusPrev() {
+			r.body.FocusLast()
+		}
+
+		return nil
 	}
 
 	if answer, ok := msg.(modal.Result[string]); ok && answer.Ok() {

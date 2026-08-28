@@ -11,7 +11,16 @@ import (
 // padding and margin, with its cursor shifted to match.
 type Frame struct {
 	style     lipgloss.Style
+	focused   *lipgloss.Style
 	component reactea.Component
+}
+
+// WhenFocused draws the frame in another style while the component inside holds
+// the focus, which is how a multi-pane UI shows where the keys are going.
+func (f *Frame) WhenFocused(style lipgloss.Style) *Frame {
+	f.focused = &style
+
+	return f
 }
 
 // Framed wraps component in style.
@@ -22,22 +31,65 @@ func Framed(style lipgloss.Style, component reactea.Component) *Frame {
 func (f *Frame) Init(ctx *reactea.Ctx) tea.Cmd { return f.component.Init(f.inner(ctx)) }
 
 func (f *Frame) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
-	return f.component.Update(f.inner(ctx), msg)
+	inner := f.inner(ctx)
+
+	if reactea.IsMouse(msg) {
+		outerX, outerY := ctx.Origin()
+		innerX, innerY := inner.Origin()
+
+		msg = reactea.TranslateMouse(msg, innerX-outerX, innerY-outerY)
+	}
+
+	return f.component.Update(inner, msg)
 }
+
+// FocusNext and the rest pass straight through, so a framed box still takes part
+// in the Tab order.
+func (f *Frame) FocusNext() bool { return f.focuser().FocusNext() }
+
+func (f *Frame) FocusPrev() bool { return f.focuser().FocusPrev() }
+
+func (f *Frame) FocusFirst() { f.focuser().FocusFirst() }
+
+func (f *Frame) FocusLast() { f.focuser().FocusLast() }
+
+func (f *Frame) focuser() Focuser {
+	if child, ok := f.component.(Focuser); ok {
+		return child
+	}
+
+	return noFocus{}
+}
+
+type noFocus struct{}
+
+func (noFocus) FocusNext() bool { return false }
+func (noFocus) FocusPrev() bool { return false }
+func (noFocus) FocusFirst()     {}
+func (noFocus) FocusLast()      {}
 
 func (f *Frame) Render(ctx *reactea.Ctx) string {
 	width, height := ctx.Size()
 
-	return f.style.Width(width).Height(height).Render(f.component.Render(f.inner(ctx)))
+	return f.current(ctx).Width(width).Height(height).Render(f.component.Render(f.inner(ctx)))
+}
+
+func (f *Frame) current(ctx *reactea.Ctx) lipgloss.Style {
+	if f.focused != nil && ctx.Focused() {
+		return *f.focused
+	}
+
+	return f.style
 }
 
 func (f *Frame) inner(ctx *reactea.Ctx) *reactea.Ctx {
 	width, height := ctx.Size()
+	style := f.current(ctx)
 
 	return ctx.Inset(
-		f.style.GetMarginLeft()+f.style.GetBorderLeftSize()+f.style.GetPaddingLeft(),
-		f.style.GetMarginTop()+f.style.GetBorderTopSize()+f.style.GetPaddingTop(),
-		width-f.style.GetHorizontalFrameSize(),
-		height-f.style.GetVerticalFrameSize(),
+		style.GetMarginLeft()+style.GetBorderLeftSize()+style.GetPaddingLeft(),
+		style.GetMarginTop()+style.GetBorderTopSize()+style.GetPaddingTop(),
+		width-style.GetHorizontalFrameSize(),
+		height-style.GetVerticalFrameSize(),
 	)
 }
