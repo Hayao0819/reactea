@@ -39,6 +39,14 @@ func main() {
 }
 ```
 
+## Examples
+
+| | |
+|---|---|
+| `examples/minimal` | one component with state, one key, a line to run it |
+| `examples/component` | the shapes a component takes, and the two ways a parent mounts one |
+| `examples/tour` | routing, layout, modals, focus and widget adapters in one screen |
+
 ## The component
 
 ```go
