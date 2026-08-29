@@ -138,6 +138,11 @@ short or long shifts nothing else; an item handed no cells is left out of the
 frame entirely. `Frame` trims the child to its inner box before drawing the
 border, so the border always has four sides.
 
+`Box.Starved()` names the items the last split had no room for — handed nothing,
+or left under their `Min`. The box never drops one on its own, so a dashboard
+that would rather hide a pane than draw it crushed reads this and calls
+`SetItems`.
+
 `Fixed` takes exactly that many cells — `Fixed(0, c)` is flexible, not hidden —
 `Grow` takes a share of what is left weighted against the other growing items,
 and `Bounded` is `Grow` with a floor and a ceiling that the split honours only
@@ -334,6 +339,24 @@ cursor in that mode; reactea leaves that choice to you.
 
 An interface whose `Update` returns the interface itself also fits `Widget[T]` —
 name it as the type argument, as in `ReactifyWidget[huh.Model](form)`.
+
+## Performance
+
+A frame costs what drawing costs. On a 20-pane bordered dashboard at 200x50:
+
+```
+BenchmarkRenderDashboard-12    3282393 ns/op    459232 B/op    11593 allocs/op
+BenchmarkUpdateDashboard-12      36586 ns/op      3640 B/op       50 allocs/op
+```
+
+Rendering is ~3 ms and handling a message is ~37 µs, so at the one-or-two frames
+a second a monitor redraws, drawing is about a percent of a core. Nothing here
+needs memoising yet; measure your own tree before assuming otherwise.
+
+What does hurt is treating Bubble Tea messages as a data bus. Every message walks
+the tree, so a dozen collectors each ticking their own results through `Update`
+multiplies that 37 µs by the number of sources and the depth of the tree. Have
+the collectors write to a store of your own and send the UI one redraw tick.
 
 ## Testing
 

@@ -88,6 +88,7 @@ type Box struct {
 	items     []Item
 
 	focused int
+	starved []int
 }
 
 // New builds a Box laying out along direction.
@@ -124,6 +125,19 @@ func (b *Box) SetItems(items ...Item) {
 	}
 
 	b.FocusFirst()
+}
+
+// Starved reports the items the last split had no room for: those handed nothing
+// at all, and those left below the Size or Min they asked for. A caller that
+// would rather hide a pane than draw it crushed reads this and decides — the box
+// itself never drops one. The slice is a copy; the box refills its own on every
+// phase, including a mouse move.
+func (b *Box) Starved() []int {
+	if len(b.starved) == 0 {
+		return nil
+	}
+
+	return append([]int(nil), b.starved...)
 }
 
 // Focused is the index of the item holding the focus, or -1.
@@ -341,7 +355,9 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 }
 
 // The split is recomputed per phase rather than cached, so Update and Render can
-// be called in any order.
+// be called in any order. Every child's box, and the record of who went short,
+// is settled before the first one is visited, so an item that reads Starved
+// during its own Render sees the whole answer.
 func (b *Box) each(ctx *reactea.Ctx, visit func(int, Item, *reactea.Ctx)) {
 	width, height := ctx.Size()
 
@@ -351,19 +367,36 @@ func (b *Box) each(ctx *reactea.Ctx, visit func(int, Item, *reactea.Ctx)) {
 	}
 
 	sizes := distribute(main, b.items)
+	boxes := make([]*reactea.Ctx, len(b.items))
+
+	b.starved = b.starved[:0]
 
 	position := 0
 
 	for i, item := range b.items {
 		focused := ctx.Focused() && i == b.focused
 
+		var got int
+
 		if b.direction == Vertical {
-			visit(i, item, ctx.Inset(0, position, cross, sizes[i]).WithFocus(focused))
+			boxes[i] = ctx.Inset(0, position, cross, sizes[i]).WithFocus(focused)
+			_, got = boxes[i].Size()
 		} else {
-			visit(i, item, ctx.Inset(position, 0, sizes[i], cross).WithFocus(focused))
+			boxes[i] = ctx.Inset(position, 0, sizes[i], cross).WithFocus(focused)
+			got, _ = boxes[i].Size()
+		}
+
+		// Measure what the child actually got: distribute can hand out more than
+		// the box holds, and Inset clamps the overflow away.
+		if got == 0 || (item.Size > 0 && got < item.Size) || (item.Min > 0 && got < item.Min) {
+			b.starved = append(b.starved, i)
 		}
 
 		position += sizes[i]
+	}
+
+	for i, item := range b.items {
+		visit(i, item, boxes[i])
 	}
 }
 

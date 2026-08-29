@@ -459,3 +459,94 @@ func TestSetItemsSurvivesUncomparableComponents(t *testing.T) {
 		t.Errorf("focused = %d", box.Focused())
 	}
 }
+
+func TestStarvedNamesTheItemsThatLostOut(t *testing.T) {
+	box := Row(
+		Bounded(1, 12, 0, &probe{label: "a"}),
+		Bounded(1, 12, 0, &probe{label: "b"}),
+		Bounded(1, 12, 0, &probe{label: "c"}),
+	)
+
+	renderBox(box, 20, 1)
+
+	// 12, 8 and 0: the second is below its Min, the third got nothing.
+	if got := box.Starved(); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Errorf("Starved() = %v, want [1 2]", got)
+	}
+
+	renderBox(box, 40, 1)
+
+	if got := box.Starved(); len(got) != 0 {
+		t.Errorf("Starved() = %v in a box with room for everyone", got)
+	}
+}
+
+func TestStarvedReportsAShortenedFixed(t *testing.T) {
+	box := Row(Fixed(15, &probe{label: "a"}), Fixed(15, &probe{label: "b"}))
+
+	renderBox(box, 20, 1)
+
+	if got := box.Starved(); len(got) != 1 || got[0] != 1 {
+		t.Errorf("Starved() = %v, want [1]", got)
+	}
+}
+
+func TestStarvedIsACopy(t *testing.T) {
+	box := Row(
+		Bounded(1, 40, 0, &probe{label: "a"}),
+		Bounded(1, 40, 0, &probe{label: "b"}),
+	)
+
+	renderBox(box, 20, 1)
+
+	kept := box.Starved()
+
+	if len(kept) != 2 {
+		t.Fatalf("Starved() = %v, want both items", kept)
+	}
+
+	// Wide enough for both, so the box refills its own record with nothing.
+	renderBox(box, 200, 1)
+
+	if len(box.Starved()) != 0 {
+		t.Fatalf("Starved() = %v in a box with room", box.Starved())
+	}
+
+	if len(kept) != 2 || kept[0] != 0 || kept[1] != 1 {
+		t.Errorf("a kept result changed under the caller: %v", kept)
+	}
+}
+
+// starvedReader reports what it could see from inside its own Box.
+type starvedReader struct {
+	reactea.BasicComponent
+
+	box  *Box
+	seen []int
+}
+
+func (c *starvedReader) Render(*reactea.Ctx) string {
+	c.seen = c.box.Starved()
+
+	return ""
+}
+
+func TestStarvedIsSettledBeforeAnyChildRenders(t *testing.T) {
+	reader := &starvedReader{}
+
+	box := Column(
+		Fixed(1, reader),
+		Bounded(1, 40, 0, &probe{label: "a"}),
+		Bounded(1, 40, 0, &probe{label: "b"}),
+	)
+
+	reader.box = box
+
+	renderBox(box, 20, 4)
+
+	outside := box.Starved()
+
+	if len(reader.seen) != len(outside) {
+		t.Errorf("the first item saw %v, the caller outside saw %v", reader.seen, outside)
+	}
+}
