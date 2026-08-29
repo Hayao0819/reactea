@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/Hayao0819/reactea/v2"
+	"github.com/Hayao0819/reactea/v2/internal/render"
 )
 
 // Frame draws a lipgloss style around a component. Lipgloss counts Width and
@@ -88,7 +89,7 @@ func (f *Frame) Render(ctx *reactea.Ctx) string {
 
 	// Trim the child to the inner box first. Trimming the framed result instead
 	// would cut the border off whichever side overran.
-	content := fit(f.component.Render(inner), innerWidth, innerHeight)
+	content := render.Fit(f.component.Render(inner), innerWidth, innerHeight)
 
 	return f.current(ctx).
 		Width(width).Height(height).

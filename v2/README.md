@@ -279,6 +279,22 @@ results so its work can finish; it finishes with `modal.Return` or
 blocks — no extra goroutine, no channel handshake. Each modal gets its own
 scope, so dismissing one runs exactly its cleanups.
 
+`Push` covers the whole box. `PushAt` puts the modal somewhere else and composites
+it over the base, so a confirmation can sit in the middle with the page still
+visible around it:
+
+```go
+return p.stack.PushAt(&Confirm{}, modal.Placement{
+    X: modal.Center, Y: modal.Center, Width: 40, Height: 7,
+})
+```
+
+A zero `Width` or `Height` spans that axis. A modal is fitted to its placement
+the way a `Box` fits its children, so it is opaque over the base and cannot
+overrun the stack. Clicks beside a placed modal reach nobody: the base is covered
+as far as input goes, however much of it is visible, and it does not hold the
+focus while a modal is up — which is what keeps its cursor from showing through.
+
 ## Wrapping Bubble Tea models and bubbles widgets
 
 The two need different adapters, because a bubbles widget is not a `tea.Model`

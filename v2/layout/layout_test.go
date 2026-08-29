@@ -60,7 +60,7 @@ func (c *probe) Render(ctx *reactea.Ctx) string {
 
 type tickMsg struct{}
 
-func render(box *Box, width, height int) *reactea.App {
+func renderBox(box *Box, width, height int) *reactea.App {
 	app := reactea.New(box, reactea.WithSize(width, height))
 
 	app.View()
@@ -71,7 +71,7 @@ func render(box *Box, width, height int) *reactea.App {
 func TestColumnSplitsHeight(t *testing.T) {
 	header, body, footer := &probe{label: "h"}, &probe{label: "b"}, &probe{label: "f"}
 
-	render(Column(Fixed(1, header), Grow(1, body), Fixed(1, footer)), 20, 10)
+	renderBox(Column(Fixed(1, header), Grow(1, body), Fixed(1, footer)), 20, 10)
 
 	if header.height != 1 || footer.height != 1 {
 		t.Errorf("fixed heights = %d, %d, want 1, 1", header.height, footer.height)
@@ -93,7 +93,7 @@ func TestColumnSplitsHeight(t *testing.T) {
 func TestRowSplitsWidthByWeight(t *testing.T) {
 	sidebar, main := &probe{label: "s"}, &probe{label: "m"}
 
-	render(Row(Grow(1, sidebar), Grow(3, main)), 100, 5)
+	renderBox(Row(Grow(1, sidebar), Grow(3, main)), 100, 5)
 
 	if sidebar.width != 25 || main.width != 75 {
 		t.Errorf("widths = %d, %d, want 25, 75", sidebar.width, main.width)
@@ -164,7 +164,7 @@ func TestBoundedRespectsMinAndMax(t *testing.T) {
 func TestCursorIsTranslatedByOffset(t *testing.T) {
 	body := &probe{label: "b", wantsCursor: true, cursorX: 3, cursorY: 2}
 
-	app := render(Column(Fixed(2, &probe{label: "h"}), Grow(1, body).Focusable()), 20, 10)
+	app := renderBox(Column(Fixed(2, &probe{label: "h"}), Grow(1, body).Focusable()), 20, 10)
 
 	cursor := app.View().Cursor
 
@@ -180,7 +180,7 @@ func TestCursorIsTranslatedByOffset(t *testing.T) {
 func TestRowTranslatesCursorHorizontally(t *testing.T) {
 	main := &probe{label: "m", wantsCursor: true, cursorX: 1, cursorY: 1}
 
-	app := render(Row(Fixed(10, &probe{label: "s"}), Grow(1, main).Focusable()), 40, 5)
+	app := renderBox(Row(Fixed(10, &probe{label: "s"}), Grow(1, main).Focusable()), 40, 5)
 
 	cursor := app.View().Cursor
 
