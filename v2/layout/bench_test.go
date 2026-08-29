@@ -27,12 +27,20 @@ func (p *panel) Render(ctx *reactea.Ctx) string {
 	return strings.Join(rows, "\n")
 }
 
-func dashboard(panes int) *Box {
+func dashboard(panes int, memoize bool) *Box {
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
 
 	columns := make([]Item, 0, panes)
+
 	for range panes {
-		columns = append(columns, Grow(1, Framed(style, &panel{row: strings.Repeat("x", 200)})).Focusable())
+		var pane reactea.Component = Framed(style, &panel{row: strings.Repeat("x", 200)})
+
+		if memoize {
+			generation := 0
+			pane = Memo(pane, func() any { return generation })
+		}
+
+		columns = append(columns, Grow(1, pane).Focusable())
 	}
 
 	return Column(
@@ -43,7 +51,7 @@ func dashboard(panes int) *Box {
 }
 
 func BenchmarkRenderDashboard(b *testing.B) {
-	app := reactea.New(dashboard(20), reactea.WithSize(200, 50))
+	app := reactea.New(dashboard(20, false), reactea.WithSize(200, 50))
 
 	app.Init()
 
@@ -55,8 +63,22 @@ func BenchmarkRenderDashboard(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderDashboardMemoized(b *testing.B) {
+	app := reactea.New(dashboard(20, true), reactea.WithSize(200, 50))
+
+	app.Init()
+	app.View()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		app.View()
+	}
+}
+
 func BenchmarkUpdateDashboard(b *testing.B) {
-	app := reactea.New(dashboard(20), reactea.WithSize(200, 50))
+	app := reactea.New(dashboard(20, false), reactea.WithSize(200, 50))
 
 	app.Init()
 

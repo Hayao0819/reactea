@@ -139,7 +139,8 @@ frame entirely. `Frame` trims the child to its inner box before drawing the
 border, so the border always has four sides.
 
 `Box.Starved()` names the items the last split had no room for — handed nothing,
-or left under their `Min`. The box never drops one on its own, so a dashboard
+or left under the `Size` or `Min` they asked for. It is settled before any child
+renders, so a header inside the same box can report it. The box never drops one on its own, so a dashboard
 that would rather hide a pane than draw it crushed reads this and calls
 `SetItems`.
 
@@ -345,13 +346,28 @@ name it as the type argument, as in `ReactifyWidget[huh.Model](form)`.
 A frame costs what drawing costs. On a 20-pane bordered dashboard at 200x50:
 
 ```
-BenchmarkRenderDashboard-12    3282393 ns/op    459232 B/op    11593 allocs/op
-BenchmarkUpdateDashboard-12      36586 ns/op      3640 B/op       50 allocs/op
+BenchmarkRenderDashboard-12            3238854 ns/op    460548 B/op    11594 allocs/op
+BenchmarkRenderDashboardMemoized-12    1669440 ns/op    167311 B/op      707 allocs/op
+BenchmarkUpdateDashboard-12              36956 ns/op      3800 B/op       51 allocs/op
 ```
 
-Rendering is ~3 ms and handling a message is ~37 µs, so at the one-or-two frames
-a second a monitor redraws, drawing is about a percent of a core. Nothing here
-needs memoising yet; measure your own tree before assuming otherwise.
+Rendering is ~3 ms and handling a message is ~37 µs, so at the one or two frames
+a second a monitor redraws, drawing costs about a percent of a core. Most of it
+is lipgloss styling the borders, which is why `layout.Memo` halves the frame and
+takes the allocations from 11594 to 707:
+
+```go
+layout.Memo(pane, func() any { return snapshot.Generation })
+```
+
+`Init` and `Update` always run — only drawing is skipped, so the child's state is
+never stale, its picture is merely reused. The cache is dropped when the key
+changes or the box is resized, and a **focused** pane is never cached at all:
+only a focused component may set the cursor, and it does that while drawing.
+
+`SetItems` and `SetStyle` change what is drawn without moving any key, so call
+`Invalidate()` after either — the two features pull in opposite directions and
+the box has no way to find the `Memo` around it.
 
 What does hurt is treating Bubble Tea messages as a data bus. Every message walks
 the tree, so a dozen collectors each ticking their own results through `Update`
