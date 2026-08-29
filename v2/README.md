@@ -400,7 +400,7 @@ An `App` runs without a terminal, which is all a component test needs.
 ```go
 app := reactea.New(page, reactea.WithSize(70, 20), reactea.WithRoute("/inbox"))
 
-app.Send(app.Init()())
+app.Start()
 app.Send(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 if !strings.Contains(app.View().Content, "Reloading") {
@@ -408,8 +408,8 @@ if !strings.Contains(app.View().Content, "Reloading") {
 }
 ```
 
-`Send` runs whatever the message produces, and what that produces, until nothing
-is left, so a test sees the state a user would. Commands run inline: one that
+`Start` runs `Init` and everything it produces; `Send` does the same for a
+message, until nothing is left, so a test sees the state a user would. Commands run inline: one that
 sleeps makes `Send` wait for it, so keep test intervals short.
 
 `App.View()` returns the whole `tea.View`, so the cursor is assertable too. The

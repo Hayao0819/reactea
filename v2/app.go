@@ -121,6 +121,10 @@ func (a *App) Send(msgs ...tea.Msg) {
 		pending = append(pending, cmd)
 	}
 
+	a.drain(pending...)
+}
+
+func (a *App) drain(pending ...tea.Cmd) {
 	for round := 0; round < sendRounds && len(pending) > 0; round++ {
 		cmd := pending[0]
 		pending = pending[1:]
@@ -144,6 +148,12 @@ func (a *App) Send(msgs ...tea.Msg) {
 		_, next := a.Update(produced)
 		pending = append(pending, next)
 	}
+}
+
+// Start runs Init and everything it produces, the way a program would before its
+// first frame. Tests use it instead of driving Init by hand.
+func (a *App) Start() {
+	a.drain(a.Init())
 }
 
 // Run builds a program and runs it.

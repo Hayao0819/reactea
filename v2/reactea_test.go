@@ -582,3 +582,43 @@ func TestScopeContextOnAClosedScopeIsAlreadyCancelled(t *testing.T) {
 		t.Error("a context taken from a closed scope was live")
 	}
 }
+
+type startChain struct {
+	reactea.BasicComponent
+
+	steps []string
+}
+
+func (c *startChain) Render(*reactea.Ctx) string { return strings.Join(c.steps, ",") }
+
+func (c *startChain) Init(*reactea.Ctx) tea.Cmd {
+	return func() tea.Msg { return stepMsg("loaded") }
+}
+
+func (c *startChain) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if step, ok := msg.(stepMsg); ok {
+		c.steps = append(c.steps, string(step))
+	}
+
+	return nil
+}
+
+func TestStartRunsWhatInitProduces(t *testing.T) {
+	app := reactea.New(&startChain{}, reactea.WithSize(20, 1))
+
+	app.Start()
+
+	if got := app.View().Content; got != "loaded" {
+		t.Errorf("content = %q, want Init's result", got)
+	}
+}
+
+func TestStartOnAComponentWithNoInitCommand(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 1))
+
+	app.Start()
+
+	if !(&probe{}).inited && app.View().Content != "x" {
+		t.Errorf("content = %q", app.View().Content)
+	}
+}
