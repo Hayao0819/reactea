@@ -550,3 +550,36 @@ func TestStarvedIsSettledBeforeAnyChildRenders(t *testing.T) {
 		t.Errorf("the first item saw %v, the caller outside saw %v", reader.seen, outside)
 	}
 }
+
+type wrapping struct {
+	reactea.Wrapper
+}
+
+func TestAWrapperStaysInTheTabOrder(t *testing.T) {
+	inner := Row(Grow(1, &probe{label: "a"}).Focusable(), Grow(1, &probe{label: "b"}).Focusable())
+
+	outer := Column(Grow(1, &wrapping{Wrapper: reactea.Wrap(inner)}))
+
+	if !outer.HasFocusable() {
+		t.Fatal("a Wrapper hid the focusables inside it")
+	}
+
+	if !outer.FocusNext() {
+		t.Fatal("Tab could not descend through the Wrapper")
+	}
+
+	if inner.Focused() != 1 {
+		t.Errorf("inner focused = %d, want 1", inner.Focused())
+	}
+}
+
+func TestAWrapperWithNothingFocusableIsNotFocusable(t *testing.T) {
+	outer := Column(
+		Grow(1, &wrapping{Wrapper: reactea.Wrap(reactea.Text("plain"))}),
+		Grow(1, &probe{label: "b"}).Focusable(),
+	)
+
+	if outer.Focused() != 1 {
+		t.Errorf("focused = %d, want the only focusable item", outer.Focused())
+	}
+}

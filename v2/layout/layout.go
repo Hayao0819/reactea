@@ -71,17 +71,7 @@ func Bounded(weight, minimum, maximum int, component reactea.Component) Item {
 // Box lays its items out along one axis and gives each the full cross axis.
 // Focuser is a container that can move the focus among its children. Box
 // implements it, so nested boxes hand Tab down before advancing themselves.
-type Focuser interface {
-	FocusNext() bool
-	FocusPrev() bool
-	FocusFirst()
-	FocusLast()
-
-	// HasFocusable reports whether there is anything inside to focus. A
-	// container that holds none must not be handed the focus, or keys would
-	// vanish into it.
-	HasFocusable() bool
-}
+type Focuser = reactea.Focuser
 
 type Box struct {
 	direction Direction

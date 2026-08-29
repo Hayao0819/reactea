@@ -55,31 +55,15 @@ func (f *Frame) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 
 // FocusNext and the rest pass straight through, so a framed box still takes part
 // in the Tab order.
-func (f *Frame) FocusNext() bool { return f.focuser().FocusNext() }
+func (f *Frame) FocusNext() bool { return reactea.FocusOf(f.component).FocusNext() }
 
-func (f *Frame) FocusPrev() bool { return f.focuser().FocusPrev() }
+func (f *Frame) FocusPrev() bool { return reactea.FocusOf(f.component).FocusPrev() }
 
-func (f *Frame) FocusFirst() { f.focuser().FocusFirst() }
+func (f *Frame) FocusFirst() { reactea.FocusOf(f.component).FocusFirst() }
 
-func (f *Frame) FocusLast() { f.focuser().FocusLast() }
+func (f *Frame) FocusLast() { reactea.FocusOf(f.component).FocusLast() }
 
-func (f *Frame) HasFocusable() bool { return f.focuser().HasFocusable() }
-
-func (f *Frame) focuser() Focuser {
-	if child, ok := f.component.(Focuser); ok {
-		return child
-	}
-
-	return noFocus{}
-}
-
-type noFocus struct{}
-
-func (noFocus) FocusNext() bool    { return false }
-func (noFocus) FocusPrev() bool    { return false }
-func (noFocus) FocusFirst()        {}
-func (noFocus) FocusLast()         {}
-func (noFocus) HasFocusable() bool { return false }
+func (f *Frame) HasFocusable() bool { return reactea.FocusOf(f.component).HasFocusable() }
 
 func (f *Frame) Render(ctx *reactea.Ctx) string {
 	width, height := ctx.Size()

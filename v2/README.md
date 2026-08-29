@@ -204,6 +204,11 @@ scope, so a page routed away from mid-typing releases it automatically — even 
 the claim was still in flight when the scope closed. The package-level
 `reactea.CaptureInput` is the unscoped form and must be paired.
 
+A container that wraps another passes the focus methods through — `Frame`,
+`Memo` and `reactea.Wrapper` all do, via `reactea.FocusOf` — so Tab reaches a
+focusable however many wrappers sit above it. Implement `reactea.Focuser` to put
+a container of your own in the same order.
+
 `FocusNext` descends into a nested box before advancing, and reports false at the
 end so the caller decides how to wrap. A component reads `ctx.Focused()` to style
 itself, and **only a focused component may set the cursor** — one cursor per frame

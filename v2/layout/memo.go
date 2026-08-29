@@ -41,23 +41,15 @@ func (m *Memoized) Init(ctx *reactea.Ctx) tea.Cmd { return m.child.Init(ctx) }
 
 // The focus methods pass straight through, so a memoised box still takes part in
 // the Tab order.
-func (m *Memoized) FocusNext() bool { return m.focuser().FocusNext() }
+func (m *Memoized) FocusNext() bool { return reactea.FocusOf(m.child).FocusNext() }
 
-func (m *Memoized) FocusPrev() bool { return m.focuser().FocusPrev() }
+func (m *Memoized) FocusPrev() bool { return reactea.FocusOf(m.child).FocusPrev() }
 
-func (m *Memoized) FocusFirst() { m.focuser().FocusFirst() }
+func (m *Memoized) FocusFirst() { reactea.FocusOf(m.child).FocusFirst() }
 
-func (m *Memoized) FocusLast() { m.focuser().FocusLast() }
+func (m *Memoized) FocusLast() { reactea.FocusOf(m.child).FocusLast() }
 
-func (m *Memoized) HasFocusable() bool { return m.focuser().HasFocusable() }
-
-func (m *Memoized) focuser() Focuser {
-	if child, ok := m.child.(Focuser); ok {
-		return child
-	}
-
-	return noFocus{}
-}
+func (m *Memoized) HasFocusable() bool { return reactea.FocusOf(m.child).HasFocusable() }
 
 func (m *Memoized) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	return m.child.Update(ctx, msg)
