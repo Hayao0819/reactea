@@ -63,6 +63,9 @@ func Grow(weight int, component reactea.Component) Item {
 	return Item{Component: component, Grow: weight}
 }
 
+// Spacer is blank space of exactly size cells on the main axis.
+func Spacer(size int) Item { return Fixed(size, reactea.Text("")) }
+
 // Bounded is Grow with a floor and a ceiling. A zero maximum means unbounded.
 func Bounded(weight, minimum, maximum int, component reactea.Component) Item {
 	return Item{Component: component, Grow: weight, Min: minimum, Max: maximum}

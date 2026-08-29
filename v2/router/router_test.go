@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/Hayao0819/reactea/v2"
+	"github.com/Hayao0819/reactea/v2/layout"
 	"github.com/Hayao0819/reactea/v2/router"
 )
 
@@ -315,5 +316,60 @@ func TestPageAndParamAdapters(t *testing.T) {
 
 	if content, _ := render(t, routes, "/mail/42"); !strings.Contains(content, "mail 42") {
 		t.Errorf("content = %q", content)
+	}
+}
+
+type paneBox struct {
+	reactea.BasicComponent
+
+	box *layout.Box
+}
+
+func (c *paneBox) Init(ctx *reactea.Ctx) tea.Cmd              { return c.box.Init(ctx) }
+func (c *paneBox) Update(ctx *reactea.Ctx, m tea.Msg) tea.Cmd { return c.box.Update(ctx, m) }
+func (c *paneBox) Render(ctx *reactea.Ctx) string             { return c.box.Render(ctx) }
+func (c *paneBox) FocusNext() bool                            { return c.box.FocusNext() }
+func (c *paneBox) FocusPrev() bool                            { return c.box.FocusPrev() }
+func (c *paneBox) FocusFirst()                                { c.box.FocusFirst() }
+func (c *paneBox) FocusLast()                                 { c.box.FocusLast() }
+func (c *paneBox) HasFocusable() bool                         { return c.box.HasFocusable() }
+
+// A routed page holding two panes must be reachable pane by pane, not as one
+// stop on the way round.
+func TestTabDescendsIntoARoutedPage(t *testing.T) {
+	top, bottom := &page{label: "top"}, &page{label: "bottom"}
+
+	inner := layout.Column(
+		layout.Grow(1, top).Focusable(),
+		layout.Grow(1, bottom).Focusable(),
+	)
+
+	pages := router.NewWithRoutes(router.Routes{
+		"default": router.Page(func() reactea.Component { return &paneBox{box: inner} }),
+	})
+
+	rail := &page{label: "rail"}
+	outer := layout.Row(layout.Fixed(4, rail).Focusable(), layout.Grow(1, pages))
+
+	app := reactea.New(outer, reactea.WithSize(20, 6))
+
+	app.Init()
+
+	if !pages.HasFocusable() {
+		t.Fatal("the router hid the panes inside its page")
+	}
+
+	reached := []int{}
+
+	for range 4 {
+		if !outer.FocusNext() {
+			break
+		}
+
+		reached = append(reached, inner.Focused())
+	}
+
+	if len(reached) != 2 || reached[0] != 0 || reached[1] != 1 {
+		t.Errorf("Tab reached panes %v, want both of them", reached)
 	}
 }

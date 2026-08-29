@@ -583,3 +583,22 @@ func TestAWrapperWithNothingFocusableIsNotFocusable(t *testing.T) {
 		t.Errorf("focused = %d, want the only focusable item", outer.Focused())
 	}
 }
+
+func TestSpacerTakesRoomAndDrawsNothing(t *testing.T) {
+	left, right := &probe{label: "l"}, &probe{label: "r"}
+
+	renderBox(Row(Fixed(4, left), Spacer(2), Fixed(4, right)), 10, 1)
+
+	if left.width != 4 || right.width != 4 {
+		t.Errorf("widths = %d, %d, want 4, 4", left.width, right.width)
+	}
+
+	content := reactea.New(
+		Row(Fixed(2, reactea.Text("ab")), Spacer(2), Fixed(2, reactea.Text("cd"))),
+		reactea.WithSize(6, 1),
+	).View().Content
+
+	if content != "ab  cd" {
+		t.Errorf("content = %q, want %q", content, "ab  cd")
+	}
+}

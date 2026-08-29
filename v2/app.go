@@ -102,6 +102,50 @@ func (a *App) Program(options ...tea.ProgramOption) *tea.Program {
 	return a.program
 }
 
+// sendRounds bounds one Send, so a command that reschedules itself cannot spin
+// forever in a test.
+const sendRounds = 100
+
+// Send delivers msg and runs whatever it produces, and what that produces, until
+// nothing is left — so a test sees the state a user would after the same event.
+// It is the loop a test would otherwise write by hand.
+//
+// Commands run inline: one that sleeps makes Send wait for it, so keep test
+// intervals short. A command that keeps rescheduling itself stops Send after a
+// hundred rounds rather than hanging it.
+func (a *App) Send(msgs ...tea.Msg) {
+	pending := make([]tea.Cmd, 0, len(msgs))
+
+	for _, msg := range msgs {
+		_, cmd := a.Update(msg)
+		pending = append(pending, cmd)
+	}
+
+	for round := 0; round < sendRounds && len(pending) > 0; round++ {
+		cmd := pending[0]
+		pending = pending[1:]
+
+		if cmd == nil {
+			continue
+		}
+
+		produced := cmd()
+
+		if batch, ok := produced.(tea.BatchMsg); ok {
+			pending = append(pending, batch...)
+
+			continue
+		}
+
+		if produced == nil {
+			continue
+		}
+
+		_, next := a.Update(produced)
+		pending = append(pending, next)
+	}
+}
+
 // Run builds a program and runs it.
 func (a *App) Run(options ...tea.ProgramOption) error {
 	_, err := a.Program(options...).Run()

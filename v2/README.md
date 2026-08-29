@@ -85,6 +85,17 @@ func (c *Page) Init(ctx *reactea.Ctx) tea.Cmd {
 }
 ```
 
+For anything that runs in the background, take the scope's context instead of
+holding a cancel func:
+
+```go
+func (c *Page) Init(ctx *reactea.Ctx) tea.Cmd {
+	return c.follow(ctx.Context())
+}
+```
+
+It is cancelled when the scope closes, so there is nothing to remember.
+
 Cleanups belong to a `Scope`. The app has a root scope that closes when the
 program ends — through `tea.Quit`, Ctrl+C or a signal alike — so nothing is
 stranded by a parent that forgot to forward a call. A parent that mounts and
@@ -143,6 +154,8 @@ or left under the `Size` or `Min` they asked for. It is settled before any child
 renders, so a header inside the same box can report it. The box never drops one on its own, so a dashboard
 that would rather hide a pane than draw it crushed reads this and calls
 `SetItems`.
+
+`Spacer(n)` is blank space of exactly n cells, for the gap between two panes.
 
 `Fixed` takes exactly that many cells — `Fixed(0, c)` is flexible, not hidden —
 `Grow` takes a share of what is left weighted against the other growing items,
@@ -205,8 +218,9 @@ the claim was still in flight when the scope closed. The package-level
 `reactea.CaptureInput` is the unscoped form and must be paired.
 
 A container that wraps another passes the focus methods through — `Frame`,
-`Memo` and `reactea.Wrapper` all do, via `reactea.FocusOf` — so Tab reaches a
-focusable however many wrappers sit above it. Implement `reactea.Focuser` to put
+`Memo`, `reactea.Wrapper`, `router.Component` and `modal.Stack` all do, via
+`reactea.FocusOf` — so Tab reaches the panes inside a routed page rather than
+stopping at the router. Implement `reactea.Focuser` to put
 a container of your own in the same order.
 
 `FocusNext` descends into a nested box before advancing, and reports false at the
@@ -386,13 +400,17 @@ An `App` runs without a terminal, which is all a component test needs.
 ```go
 app := reactea.New(page, reactea.WithSize(70, 20), reactea.WithRoute("/inbox"))
 
-app.Init()
-app.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+app.Send(app.Init()())
+app.Send(tea.KeyPressMsg{Code: 'r', Text: "r"})
 
 if !strings.Contains(app.View().Content, "Reloading") {
 	t.Error(...)
 }
 ```
+
+`Send` runs whatever the message produces, and what that produces, until nothing
+is left, so a test sees the state a user would. Commands run inline: one that
+sleeps makes `Send` wait for it, so keep test intervals short.
 
 `App.View()` returns the whole `tea.View`, so the cursor is assertable too. The
 alt-screen and the title arrive by command, so feed the batch `Init` returns back

@@ -35,6 +35,18 @@ func NewWithRoutes(routes Routes) *Component { return &Component{Routes: routes}
 // Current is the routed component, or nil when nothing matched.
 func (c *Component) Current() reactea.Component { return c.current }
 
+// The focus methods reach the routed page, so Tab can move among the panes
+// inside it rather than stopping at the router.
+func (c *Component) FocusNext() bool { return reactea.FocusOf(c.current).FocusNext() }
+
+func (c *Component) FocusPrev() bool { return reactea.FocusOf(c.current).FocusPrev() }
+
+func (c *Component) FocusFirst() { reactea.FocusOf(c.current).FocusFirst() }
+
+func (c *Component) FocusLast() { reactea.FocusOf(c.current).FocusLast() }
+
+func (c *Component) HasFocusable() bool { return reactea.FocusOf(c.current).HasFocusable() }
+
 func (c *Component) Init(ctx *reactea.Ctx) tea.Cmd {
 	return c.sync(ctx)
 }

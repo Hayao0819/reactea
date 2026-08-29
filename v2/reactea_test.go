@@ -477,3 +477,108 @@ func TestACaptureLandingAfterItsScopeClosedIsDropped(t *testing.T) {
 		t.Error("a claim that landed after its scope closed was honoured")
 	}
 }
+
+type chaining struct {
+	reactea.BasicComponent
+
+	steps []string
+}
+
+type stepMsg string
+
+func (c *chaining) Render(*reactea.Ctx) string { return strings.Join(c.steps, ",") }
+
+func (c *chaining) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	step, ok := msg.(stepMsg)
+	if !ok {
+		return nil
+	}
+
+	c.steps = append(c.steps, string(step))
+
+	switch step {
+	case "one":
+		return tea.Batch(
+			func() tea.Msg { return stepMsg("two") },
+			func() tea.Msg { return stepMsg("three") },
+		)
+	case "two":
+		return func() tea.Msg { return stepMsg("four") }
+	}
+
+	return nil
+}
+
+func TestSendRunsWhatItProduces(t *testing.T) {
+	root := &chaining{}
+
+	app := reactea.New(root, reactea.WithSize(20, 1))
+
+	app.Send(stepMsg("one"))
+
+	if got := app.View().Content; got != "one,two,three,four" {
+		t.Errorf("steps = %q, want the whole chain", got)
+	}
+}
+
+type resched struct {
+	reactea.BasicComponent
+
+	seen int
+}
+
+func (c *resched) Render(*reactea.Ctx) string { return "" }
+
+func (c *resched) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if _, ok := msg.(stepMsg); !ok {
+		return nil
+	}
+
+	c.seen++
+
+	return func() tea.Msg { return stepMsg("again") }
+}
+
+func TestSendStopsACommandThatReschedulesItself(t *testing.T) {
+	root := &resched{}
+
+	app := reactea.New(root, reactea.WithSize(20, 1))
+
+	app.Send(stepMsg("again"))
+
+	if root.seen == 0 || root.seen > 200 {
+		t.Errorf("the loop ran %d times", root.seen)
+	}
+}
+
+func TestScopeContextIsCancelledOnClose(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+
+	page := app.Scope().Child()
+
+	ctx := app.Ctx().WithScope(page).Context()
+
+	if ctx.Err() != nil {
+		t.Fatal("the context started cancelled")
+	}
+
+	if same := page.Context(); same != ctx {
+		t.Error("Context returned a different context on the second call")
+	}
+
+	page.Close()
+
+	if ctx.Err() == nil {
+		t.Error("closing the scope did not cancel the context")
+	}
+}
+
+func TestScopeContextOnAClosedScopeIsAlreadyCancelled(t *testing.T) {
+	scope := reactea.NewScope()
+
+	scope.Close()
+
+	if scope.Context().Err() == nil {
+		t.Error("a context taken from a closed scope was live")
+	}
+}

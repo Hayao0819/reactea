@@ -125,6 +125,26 @@ func (s *Stack) top() *mounted {
 	return &s.modals[len(s.modals)-1]
 }
 
+// The focus methods reach whatever is taking the input: the modal on top, or the
+// base when the stack is empty.
+func (s *Stack) FocusNext() bool { return reactea.FocusOf(s.focused()).FocusNext() }
+
+func (s *Stack) FocusPrev() bool { return reactea.FocusOf(s.focused()).FocusPrev() }
+
+func (s *Stack) FocusFirst() { reactea.FocusOf(s.focused()).FocusFirst() }
+
+func (s *Stack) FocusLast() { reactea.FocusOf(s.focused()).FocusLast() }
+
+func (s *Stack) HasFocusable() bool { return reactea.FocusOf(s.focused()).HasFocusable() }
+
+func (s *Stack) focused() reactea.Component {
+	if top := s.Top(); top != nil {
+		return top
+	}
+
+	return s.base
+}
+
 func (s *Stack) Init(ctx *reactea.Ctx) tea.Cmd {
 	return s.base.Init(ctx)
 }

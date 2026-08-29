@@ -1,6 +1,8 @@
 package reactea
 
 import (
+	"context"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -64,6 +66,9 @@ func (c *Ctx) WithScope(scope *Scope) *Ctx {
 
 // Scope is the scope cleanups registered here belong to.
 func (c *Ctx) Scope() *Scope { return c.scope }
+
+// Context is cancelled when this Ctx's scope closes.
+func (c *Ctx) Context() context.Context { return c.scope.Context() }
 
 // OnDestroy registers a cleanup with this Ctx's scope.
 func (c *Ctx) OnDestroy(cleanup func()) { c.scope.OnDestroy(cleanup) }

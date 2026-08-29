@@ -1,6 +1,9 @@
 package reactea
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // Scope owns the cleanups of everything mounted under it. It replaces a Destroy
 // method on Component: a parent that mounts and unmounts children gives each a
@@ -13,6 +16,23 @@ type Scope struct {
 	cleanups []func()
 	children []*Scope
 	closed   bool
+
+	once   sync.Once
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// Context is cancelled when this scope closes, so anything started under it
+// stops when the component goes away — no cancel func to hold and no cleanup to
+// remember.
+func (s *Scope) Context() context.Context {
+	s.once.Do(func() {
+		s.ctx, s.cancel = context.WithCancel(context.Background())
+
+		s.OnDestroy(s.cancel)
+	})
+
+	return s.ctx
 }
 
 // NewScope opens a scope with no parent.
