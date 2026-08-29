@@ -461,3 +461,19 @@ func TestScopeSurvivesConcurrentRegistration(t *testing.T) {
 		t.Errorf("%d of 400 cleanups ran", registered.Load())
 	}
 }
+
+func TestACaptureLandingAfterItsScopeClosedIsDropped(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+
+	page := app.Scope().Child()
+
+	claim := app.Ctx().WithScope(page).CaptureInput()
+
+	page.Close()
+
+	app.Update(claim())
+
+	if app.InputCaptured() {
+		t.Error("a claim that landed after its scope closed was honoured")
+	}
+}

@@ -2,6 +2,8 @@
 package layout
 
 import (
+	"reflect"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/Hayao0819/reactea/v2"
@@ -37,6 +39,18 @@ func (i Item) Focusable() Item {
 
 // IsFocusable reports what Focusable set, for code that rebuilds an item list.
 func (i Item) IsFocusable() bool { return i.focusable }
+
+// sameComponent compares without the == that would panic on a component whose
+// dynamic type is uncomparable. Losing the focus beats losing the program.
+func sameComponent(a, b reactea.Component) bool {
+	if a == nil || b == nil {
+		return false
+	}
+
+	kind := reflect.TypeOf(a)
+
+	return kind == reflect.TypeOf(b) && kind.Comparable() && a == b
+}
 
 // Fixed gives the child exactly size cells on the main axis.
 func Fixed(size int, component reactea.Component) Item {
@@ -101,7 +115,7 @@ func (b *Box) SetItems(items ...Item) {
 	b.focused = -1
 
 	for i := range items {
-		if items[i].Component == focused && b.takesFocus(i) {
+		if sameComponent(items[i].Component, focused) && b.takesFocus(i) {
 			b.focused = i
 
 			return
@@ -297,6 +311,12 @@ func (b *Box) routeMouse(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 // strings would shift its neighbours, and hit-testing would then disagree with
 // what is on screen.
 func fit(content string, width, height int) string {
+	// Lipgloss reads MaxWidth(0) and MaxHeight(0) as unset, so an item handed no
+	// cells has to be emptied here rather than trimmed there.
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+
 	if actual, rows := lipgloss.Size(content); actual == width && rows == height {
 		return content
 	}
@@ -322,6 +342,12 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 
 	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
 		width, height := childCtx.Size()
+
+		// An item with no cells on the main axis is left out entirely; joining its
+		// empty string would still cost a row or a column.
+		if (b.direction == Vertical && height <= 0) || (b.direction == Horizontal && width <= 0) {
+			return
+		}
 
 		rendered = append(rendered, fit(item.Component.Render(childCtx), width, height))
 	})

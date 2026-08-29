@@ -134,7 +134,9 @@ layout.Column(
 ```
 
 `Box` pads or trims each child to the box it was given, so a child that renders
-short or long shifts nothing else. `Frame` does the same for its outer size.
+short or long shifts nothing else; an item handed no cells is left out of the
+frame entirely. `Frame` trims the child to its inner box before drawing the
+border, so the border always has four sides.
 
 `Fixed` takes exactly that many cells — `Fixed(0, c)` is flexible, not hidden —
 `Grow` takes a share of what is left weighted against the other growing items,
@@ -192,8 +194,9 @@ cursor, since only a focused component may set one.
 Capturing and focus are separate mechanisms: `CaptureInput` silences the root's
 global keys, it does not redirect them. Whatever captures must hold the focus
 too, or the keys go elsewhere. `ctx.CaptureInput()` ties the claim to the Ctx's
-scope, so a page routed away from mid-typing releases it automatically; the
-package-level `reactea.CaptureInput` is the unscoped form and must be paired.
+scope, so a page routed away from mid-typing releases it automatically — even if
+the claim was still in flight when the scope closed. The package-level
+`reactea.CaptureInput` is the unscoped form and must be paired.
 
 `FocusNext` descends into a nested box before advancing, and reports false at the
 end so the caller decides how to wrap. A component reads `ctx.Focused()` to style

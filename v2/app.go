@@ -185,11 +185,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case captureMsg:
-		a.captures = max(0, a.captures+msg.delta)
-
 		if msg.held != nil {
+			// The scope closed before the claim landed, so nobody is left to release
+			// it.
+			if msg.held.dead {
+				return a, nil
+			}
+
 			msg.held.held = true
 		}
+
+		a.captures = max(0, a.captures+msg.delta)
 
 		return a, nil
 

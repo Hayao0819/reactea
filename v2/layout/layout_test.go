@@ -442,3 +442,20 @@ func TestSetItemsKeepsTheFocusOnTheSameComponent(t *testing.T) {
 		t.Errorf("Items() = %d entries", len(box.Items()))
 	}
 }
+
+// valueComponent is uncomparable, which == would panic on.
+type valueComponent struct{ tags []string }
+
+func (c valueComponent) Init(*reactea.Ctx) tea.Cmd            { return nil }
+func (c valueComponent) Update(*reactea.Ctx, tea.Msg) tea.Cmd { return nil }
+func (c valueComponent) Render(*reactea.Ctx) string           { return "" }
+
+func TestSetItemsSurvivesUncomparableComponents(t *testing.T) {
+	box := Row(Grow(1, valueComponent{tags: []string{"a"}}).Focusable())
+
+	box.SetItems(Grow(1, valueComponent{tags: []string{"b"}}).Focusable())
+
+	if box.Focused() != 0 {
+		t.Errorf("focused = %d", box.Focused())
+	}
+}

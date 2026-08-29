@@ -21,9 +21,12 @@ type captureMsg struct {
 type capture struct {
 	app  *App
 	held bool
+	dead bool
 }
 
 func (c *capture) release() {
+	c.dead = true
+
 	if !c.held {
 		return
 	}

@@ -92,3 +92,50 @@ func TestFrameHoldsItsBoxWhenTheChildMisfits(t *testing.T) {
 		}
 	}
 }
+
+// leaky ignores the box it was given entirely.
+type leaky struct {
+	reactea.BasicComponent
+
+	content string
+}
+
+func (c *leaky) Render(*reactea.Ctx) string { return c.content }
+
+func TestAnItemWithNoCellsDrawsNothing(t *testing.T) {
+	width, _ := rendered(Row(
+		Fixed(20, &misfit{fill: 'a'}),
+		Grow(1, &leaky{content: "LEAK"}),
+	), 20, 1)
+
+	if width != 20 {
+		t.Errorf("row is %d wide, want 20: a zero-cell item leaked", width)
+	}
+
+	_, height := rendered(Column(
+		Fixed(2, &misfit{fill: 'a'}),
+		Grow(1, &leaky{content: "LEAK"}),
+	), 8, 2)
+
+	if height != 2 {
+		t.Errorf("column is %d tall, want 2: a zero-cell item leaked", height)
+	}
+}
+
+func TestFrameKeepsAllFourBorders(t *testing.T) {
+	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+
+	for _, child := range []*misfit{{fill: 'a', dh: 3}, {fill: 'a', dw: 6}} {
+		content := reactea.New(Framed(style, child), reactea.WithSize(12, 4)).View().Content
+
+		lines := strings.Split(content, "\n")
+
+		if !strings.HasPrefix(lines[0], "╭") {
+			t.Errorf("top border is missing:\n%s", content)
+		}
+
+		if last := lines[len(lines)-1]; !strings.HasPrefix(last, "╰") {
+			t.Errorf("bottom border was truncated away:\n%s", content)
+		}
+	}
+}

@@ -83,12 +83,17 @@ func (noFocus) HasFocusable() bool { return false }
 func (f *Frame) Render(ctx *reactea.Ctx) string {
 	width, height := ctx.Size()
 
-	// Width and Height only pad; MaxWidth and MaxHeight are what hold the frame
-	// to the box when the child overruns it.
+	inner := f.inner(ctx)
+	innerWidth, innerHeight := inner.Size()
+
+	// Trim the child to the inner box first. Trimming the framed result instead
+	// would cut the border off whichever side overran.
+	content := fit(f.component.Render(inner), innerWidth, innerHeight)
+
 	return f.current(ctx).
 		Width(width).Height(height).
 		MaxWidth(width).MaxHeight(height).
-		Render(f.component.Render(f.inner(ctx)))
+		Render(content)
 }
 
 func (f *Frame) current(ctx *reactea.Ctx) lipgloss.Style {
