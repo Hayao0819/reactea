@@ -14,15 +14,6 @@ import (
 // Containers route on this distinction. It is what keeps a modal from starving
 // the page underneath it of its own results.
 
-type captureMsg int
-
-// CaptureInput declares that something below is taking the keys. Calls nest,
-// so each capture must be paired with ReleaseInput.
-func CaptureInput() tea.Msg { return captureMsg(1) }
-
-// ReleaseInput releases one unowned input capture.
-func ReleaseInput() tea.Msg { return captureMsg(-1) }
-
 // InputCapture owns one claim on global input. Its zero value is ready to use.
 type InputCapture struct {
 	state *inputCaptureState

@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/Hayao0819/reactea/v2"
-	"github.com/Hayao0819/reactea/v2/internal/render"
+	"github.com/Hayao0819/reactea/v2/render"
 )
 
 // Result carries a modal's answer back to whoever pushed it.
@@ -19,41 +19,76 @@ type Result[T any] struct {
 // Ok reports whether the modal succeeded.
 func (r Result[T]) Ok() bool { return r.Err == nil }
 
-type dismissMsg struct{}
-
-// Dismiss closes the modal on top without an answer.
-func Dismiss() tea.Msg { return dismissMsg{} }
-
-// Return closes the modal on top and delivers value.
-func Return[T any](value T) tea.Cmd {
-	return tea.Batch(
-		Dismiss,
-		func() tea.Msg { return Result[T]{Value: value} },
-	)
+type completeMsg struct {
+	target *Stack
+	id     uint64
+	result tea.Cmd
 }
 
-// Fail closes the modal on top and delivers err.
-func Fail[T any](err error) tea.Cmd {
-	return tea.Batch(
-		Dismiss,
-		func() tea.Msg { return Result[T]{Err: err} },
-	)
+type closer interface {
+	CloseOverlay(tea.Cmd) tea.Cmd
 }
 
-// Placement is where a modal sits inside the stack's box. A zero Width or Height
-// spans that axis; an X or Y of Center puts it in the middle.
-type Placement struct {
-	X, Y          int
-	Width, Height int
+// Push opens component on the nearest Stack above ctx.
+func Push(ctx *reactea.Ctx, component reactea.Component) tea.Cmd {
+	host, ok := ctx.Overlay()
+	if !ok {
+		return nil
+	}
+
+	return host.Push(component)
 }
+
+// PushAt opens component at placement on the nearest Stack above ctx.
+func PushAt(ctx *reactea.Ctx, component reactea.Component, placement Placement) tea.Cmd {
+	host, ok := ctx.Overlay()
+	if !ok {
+		return nil
+	}
+
+	return host.PushAt(component, placement)
+}
+
+// Dismiss closes the modal associated with ctx without an answer.
+func Dismiss(ctx *reactea.Ctx) tea.Cmd { return close(ctx, nil) }
+
+// Return closes the modal associated with ctx and delivers value.
+func Return[T any](ctx *reactea.Ctx, value T) tea.Cmd {
+	return close(ctx, func() tea.Msg { return Result[T]{Value: value} })
+}
+
+// Fail closes the modal associated with ctx and delivers err.
+func Fail[T any](ctx *reactea.Ctx, err error) tea.Cmd {
+	return close(ctx, func() tea.Msg { return Result[T]{Err: err} })
+}
+
+func close(ctx *reactea.Ctx, result tea.Cmd) tea.Cmd {
+	host, ok := ctx.Overlay()
+	if !ok {
+		return nil
+	}
+
+	bound, ok := host.(closer)
+	if !ok {
+		return nil
+	}
+
+	return bound.CloseOverlay(result)
+}
+
+// Placement is where a modal sits inside the stack's box. It lives in the root
+// package so that Ctx can name it without importing this one.
+type Placement = reactea.Placement
 
 // Center asks for the middle of the axis.
-const Center = -1
+const Center = reactea.Center
 
-// FullScreen covers the whole box, which is what Push uses.
-var FullScreen = Placement{}
+// Centered places a modal of the given size in the middle of both axes.
+func Centered(width, height int) Placement {
+	return Placement{X: Center, Y: Center, Width: width, Height: height}
+}
 
-func (p Placement) rect(width, height int) (x, y, w, h int) {
+func rect(p Placement, width, height int) (x, y, w, h int) {
 	w, h = p.Width, p.Height
 	if w <= 0 || w > width {
 		w = width
@@ -79,12 +114,15 @@ type mounted struct {
 	component reactea.Component
 	scope     *reactea.Scope
 	placement Placement
+	id        uint64
+	capture   reactea.InputCapture
 }
 
 // Stack renders base until something is pushed on top of it.
 type Stack struct {
 	base   reactea.Component
 	modals []mounted
+	nextID uint64
 }
 
 // New builds a Stack over base.
@@ -92,20 +130,44 @@ func New(base reactea.Component) *Stack {
 	return &Stack{base: base}
 }
 
-// The modal is initialised on the next Update, so Push is safe from anywhere.
+// Push opens modal on this stack during the next Update.
 func (s *Stack) Push(modal reactea.Component) tea.Cmd {
-	return s.PushAt(modal, FullScreen)
+	return s.PushAt(modal, Placement{})
 }
 
 // PushAt puts a modal somewhere other than over the whole box, which is how a
 // confirmation sits in the middle with the page still visible around it.
 func (s *Stack) PushAt(modal reactea.Component, placement Placement) tea.Cmd {
-	return func() tea.Msg { return pushMsg{modal: modal, placement: placement} }
+	return func() tea.Msg { return pushMsg{target: s, modal: modal, placement: placement} }
 }
 
+// A push names the stack it was asked of. Without that the outermost stack in
+// the tree would take every one, since it sees the message first.
 type pushMsg struct {
+	target    *Stack
 	modal     reactea.Component
 	placement Placement
+}
+
+type host struct {
+	stack *Stack
+	id    uint64
+}
+
+func (h host) Push(component reactea.Component) tea.Cmd {
+	return h.stack.Push(component)
+}
+
+func (h host) PushAt(component reactea.Component, placement Placement) tea.Cmd {
+	return h.stack.PushAt(component, placement)
+}
+
+func (h host) CloseOverlay(result tea.Cmd) tea.Cmd {
+	if h.id == 0 {
+		return nil
+	}
+
+	return func() tea.Msg { return completeMsg{target: h.stack, id: h.id, result: result} }
 }
 
 // Top is the modal currently on top, or nil.
@@ -146,35 +208,55 @@ func (s *Stack) focused() reactea.Component {
 }
 
 func (s *Stack) Init(ctx *reactea.Ctx) tea.Cmd {
-	return s.base.Init(ctx)
+	ctx.OnDestroy(s.clear)
+
+	return s.base.Init(s.baseCtx(ctx))
+}
+
+func (s *Stack) clear() {
+	for i := len(s.modals) - 1; i >= 0; i-- {
+		s.modals[i].capture.ReleaseInput()
+		s.modals[i].scope.Close()
+	}
+
+	s.modals = nil
 }
 
 func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	ctx = s.baseCtx(ctx)
+
 	switch msg := msg.(type) {
 	case pushMsg:
-		// Its own scope, so dismissing one runs exactly its cleanups.
-		scope := ctx.Scope().Child()
-		s.modals = append(s.modals, mounted{component: msg.modal, scope: scope, placement: msg.placement})
+		if msg.target == s {
+			scope := ctx.Scope().Child()
+			s.nextID++
+			s.modals = append(s.modals, mounted{
+				component: msg.modal,
+				scope:     scope,
+				placement: msg.placement,
+				id:        s.nextID,
+			})
 
-		// A modal takes the keys, so the root's global keys stand down while it
-		// is up without the app having to remember.
-		return tea.Batch(msg.modal.Init(ctx.WithScope(scope)), reactea.CaptureInput)
+			top := s.top()
+			top.capture.CaptureInput(ctx.WithScope(scope))
 
-	case dismissMsg:
-		if top := s.top(); top != nil {
+			return msg.modal.Init(s.modalCtx(ctx, top))
+		}
+
+	case completeMsg:
+		if top := s.top(); msg.target == s && top != nil && top.id == msg.id {
+			top.capture.ReleaseInput()
 			top.scope.Close()
 			s.modals = s.modals[:len(s.modals)-1]
 
-			return reactea.ReleaseInput
+			return msg.result
 		}
-
-		return nil
 	}
 
 	// A modal blocks input, not data: the base keeps receiving its own ticks and
 	// async results while a modal is up, or its work would stall unfinishable.
 	if top := s.top(); top != nil && reactea.IsInput(msg) {
-		modalCtx := s.box(ctx, *top)
+		modalCtx := s.modalCtx(ctx, top)
 
 		if reactea.IsMouse(msg) {
 			outerX, outerY := ctx.Origin()
@@ -196,8 +278,9 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 
 	cmds = append(cmds, s.base.Update(ctx, msg))
 
-	for _, mounted := range s.modals {
-		cmds = append(cmds, mounted.component.Update(ctx.WithScope(mounted.scope), msg))
+	for i := range s.modals {
+		mounted := &s.modals[i]
+		cmds = append(cmds, mounted.component.Update(s.modalCtx(ctx, mounted), msg))
 	}
 
 	return tea.Batch(cmds...)
@@ -206,6 +289,8 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 func (s *Stack) Render(ctx *reactea.Ctx) string {
 	// The base does not hold the focus while a modal is up — that is already true
 	// of its input, and it is what keeps its cursor from showing through.
+	ctx = s.baseCtx(ctx)
+
 	base := s.base.Render(ctx.WithFocus(len(s.modals) == 0))
 
 	if len(s.modals) == 0 {
@@ -216,9 +301,10 @@ func (s *Stack) Render(ctx *reactea.Ctx) string {
 
 	layers := make([]*lipgloss.Layer, 0, len(s.modals))
 
-	for i, modal := range s.modals {
-		x, y, _, _ := modal.placement.rect(width, height)
-		box := s.box(ctx, modal)
+	for i := range s.modals {
+		modal := &s.modals[i]
+		x, y, _, _ := rect(modal.placement, width, height)
+		box := s.modalCtx(ctx, modal)
 		boxWidth, boxHeight := box.Size()
 
 		// Fitting is what makes a layer opaque: padded blanks cover the base, and
@@ -239,7 +325,15 @@ func (s *Stack) Render(ctx *reactea.Ctx) string {
 // to its own scope.
 func (s *Stack) box(ctx *reactea.Ctx, modal mounted) *reactea.Ctx {
 	width, height := ctx.Size()
-	x, y, w, h := modal.placement.rect(width, height)
+	x, y, w, h := rect(modal.placement, width, height)
 
 	return ctx.Inset(x, y, w, h).WithScope(modal.scope)
+}
+
+func (s *Stack) baseCtx(ctx *reactea.Ctx) *reactea.Ctx {
+	return ctx.WithOverlay(host{stack: s})
+}
+
+func (s *Stack) modalCtx(ctx *reactea.Ctx, modal *mounted) *reactea.Ctx {
+	return s.box(ctx, *modal).WithOverlay(host{stack: s, id: modal.id})
 }

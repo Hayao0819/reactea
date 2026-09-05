@@ -16,19 +16,23 @@ type prompt struct {
 
 	name      string
 	destroyed bool
+	ctx       *reactea.Ctx
 }
 
 func (c *prompt) Render(*reactea.Ctx) string { return "prompt:" + c.name }
 
 func (c *prompt) Init(ctx *reactea.Ctx) tea.Cmd {
+	c.ctx = ctx
 	ctx.OnDestroy(func() { c.destroyed = true })
 
 	return nil
 }
 
-func (c *prompt) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
+func (c *prompt) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	c.ctx = ctx
+
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "enter" {
-		return modal.Return(c.name)
+		return modal.Return(ctx, c.name)
 	}
 
 	return nil
@@ -115,42 +119,26 @@ func TestModalTakesTheInput(t *testing.T) {
 }
 
 func TestReturnPopsAndDeliversTheResult(t *testing.T) {
-	stack := modal.New(&base{})
+	seen := &watcher{}
+	seen.stack = modal.New(seen)
 
-	app := reactea.New(stack, reactea.WithSize(20, 5))
-
-	app.Init()
+	app := reactea.New(seen.stack, reactea.WithSize(20, 5))
+	app.Start()
 
 	shown := &prompt{name: "answer"}
 
-	drive(t, app, stack.Push(shown)())
+	app.Send(seen.stack.Push(shown)())
+	app.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("enter produced no command")
+	if seen.result == nil {
+		t.Fatal("the answer never arrived")
 	}
 
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok {
-		t.Fatalf("expected a batch, got %T", cmd())
+	if !seen.result.Ok() || seen.result.Value != "answer" {
+		t.Errorf("result = %+v", *seen.result)
 	}
 
-	var result modal.Result[string]
-
-	for _, sub := range batch {
-		switch msg := sub().(type) {
-		case modal.Result[string]:
-			result = msg
-		default:
-			app.Update(msg)
-		}
-	}
-
-	if !result.Ok() || result.Value != "answer" {
-		t.Errorf("result = %+v", result)
-	}
-
-	if stack.Top() != nil {
+	if seen.stack.Top() != nil {
 		t.Error("the modal was not popped")
 	}
 
@@ -163,37 +151,73 @@ func TestReturnPopsAndDeliversTheResult(t *testing.T) {
 	}
 }
 
+// watcher records what the stack looked like at the moment the answer reached
+// it, which is what "atomic" has to mean.
+type watcher struct {
+	reactea.BasicComponent
+
+	stack   *modal.Stack
+	result  *modal.Result[string]
+	stillUp bool
+}
+
+func (c *watcher) Render(*reactea.Ctx) string { return "base" }
+
+func (c *watcher) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if answer, ok := msg.(modal.Result[string]); ok {
+		c.result = &answer
+		c.stillUp = c.stack.Top() != nil
+	}
+
+	return nil
+}
+
 func TestFailDeliversAnError(t *testing.T) {
-	stack := modal.New(&base{})
+	seen := &watcher{}
+	seen.stack = modal.New(seen)
 
-	app := reactea.New(stack, reactea.WithSize(20, 5))
+	app := reactea.New(seen.stack, reactea.WithSize(20, 5))
+	app.Start()
 
-	app.Init()
+	shown := &prompt{name: "x"}
+	app.Send(seen.stack.Push(shown)())
+	app.Send(modal.Fail[string](shown.ctx, errors.New("nope"))())
 
-	drive(t, app, stack.Push(&prompt{name: "x"})())
-
-	batch, ok := modal.Fail[string](errors.New("nope"))().(tea.BatchMsg)
-	if !ok {
-		t.Fatal("Fail did not produce a batch")
+	if seen.result == nil {
+		t.Fatal("the answer never arrived")
 	}
 
-	var result modal.Result[string]
-
-	for _, sub := range batch {
-		switch msg := sub().(type) {
-		case modal.Result[string]:
-			result = msg
-		default:
-			app.Update(msg)
-		}
-	}
-
-	if result.Ok() {
+	if seen.result.Ok() {
 		t.Error("a failed result reported Ok")
 	}
 
-	if stack.Top() != nil {
+	if seen.stack.Top() != nil {
 		t.Error("Fail did not pop the modal")
+	}
+}
+
+// The pop and the answer used to be two commands in a tea.Batch, whose order
+// Bubble Tea does not promise. Reversing the batches shows whether a handler
+// could see the modal still up.
+func TestTheAnswerArrivesAfterTheModalIsGone(t *testing.T) {
+	for _, reversed := range []bool{false, true} {
+		seen := &watcher{}
+		seen.stack = modal.New(seen)
+
+		app := reactea.New(seen.stack, reactea.WithSize(20, 5))
+		app.ReverseBatches(reversed)
+		app.Start()
+
+		app.Send(seen.stack.Push(&prompt{name: "x"})())
+		app.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+		if seen.result == nil {
+			t.Fatalf("reversed=%v: the answer never arrived", reversed)
+		}
+
+		if seen.stillUp {
+			t.Errorf("reversed=%v: the handler saw the modal still up", reversed)
+		}
 	}
 }
 
@@ -228,7 +252,7 @@ func TestDismissOnlyTearsDownTheTop(t *testing.T) {
 	drive(t, app, stack.Push(first)())
 	drive(t, app, stack.Push(second)())
 
-	app.Update(modal.Dismiss())
+	app.Send(modal.Dismiss(second.ctx)())
 
 	if !second.destroyed {
 		t.Error("the dismissed modal's cleanup never ran")
@@ -253,7 +277,8 @@ func TestDataReachesTheBaseWhileAModalIsUp(t *testing.T) {
 
 	app.Init()
 
-	drive(t, app, stack.Push(&prompt{name: "x"})())
+	shown := &prompt{name: "x"}
+	drive(t, app, stack.Push(shown)())
 
 	before := page.seen
 
@@ -277,13 +302,14 @@ func TestAModalCapturesInput(t *testing.T) {
 
 	app.Init()
 
-	drive(t, app, stack.Push(&prompt{name: "x"})())
+	shown := &prompt{name: "x"}
+	drive(t, app, stack.Push(shown)())
 
 	if !app.InputCaptured() {
 		t.Error("a modal did not capture the input")
 	}
 
-	drive(t, app, modal.Dismiss())
+	app.Send(modal.Dismiss(shown.ctx)())
 
 	if app.InputCaptured() {
 		t.Error("dismissing the modal did not release the input")
@@ -450,13 +476,14 @@ func TestTheBaseCursorHidesUnderAModal(t *testing.T) {
 		t.Fatal("the base had no cursor to begin with")
 	}
 
-	drive(t, app, stack.Push(&filler{fill: '#'})())
+	shown := &prompt{name: "cursor cover"}
+	drive(t, app, stack.Push(shown)())
 
 	if cursor := app.View().Cursor; cursor != nil {
 		t.Errorf("the base's cursor showed through the modal: %+v", cursor)
 	}
 
-	drive(t, app, modal.Dismiss())
+	app.Send(modal.Dismiss(shown.ctx)())
 
 	if app.View().Cursor == nil {
 		t.Error("the base's cursor did not come back")
@@ -474,5 +501,164 @@ func TestTheStackHoldsItsBox(t *testing.T) {
 
 	if width, height := lipgloss.Size(app.View().Content); width != 20 || height != 4 {
 		t.Errorf("rendered %dx%d, want 20x4", width, height)
+	}
+}
+
+// asker pushes a modal from wherever it is mounted, with no callback handed down
+// to it.
+type asker struct {
+	reactea.BasicComponent
+
+	pushed bool
+}
+
+func (c *asker) Render(*reactea.Ctx) string { return "base" }
+
+func (c *asker) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if !reactea.Key(msg, "a") {
+		return nil
+	}
+
+	c.pushed = true
+
+	return modal.PushAt(ctx, &prompt{name: "ASKED"}, modal.Centered(12, 1))
+}
+
+func TestAComponentFindsTheStackThroughItsCtx(t *testing.T) {
+	base := &asker{}
+	stack := modal.New(base)
+
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+	app.Start()
+
+	app.Send(tea.KeyPressMsg{Code: 'a', Text: "a"})
+
+	if !base.pushed {
+		t.Fatal("the component never found a host")
+	}
+
+	if got := app.View().Content; !strings.Contains(got, "prompt:ASKED") {
+		t.Errorf("content = %q, want the pushed modal", got)
+	}
+}
+
+// A stack inside a modal is nearer than the one that opened it, so a component
+// under it must reach the inner one.
+func TestTheNearestStackWins(t *testing.T) {
+	inner := &asker{}
+	nested := modal.New(inner)
+	outer := modal.New(nested)
+
+	app := reactea.New(outer, reactea.WithSize(20, 5))
+	app.Start()
+
+	app.Send(tea.KeyPressMsg{Code: 'a', Text: "a"})
+
+	if nested.Top() == nil {
+		t.Error("the push went past the nearest stack")
+	}
+
+	if outer.Top() != nil {
+		t.Error("the outer stack took a push meant for the inner one")
+	}
+}
+
+func TestNestedModalClosesItsOwnStack(t *testing.T) {
+	innerBase := &asker{}
+	inner := modal.New(innerBase)
+	outer := modal.New(&base{})
+
+	app := reactea.New(outer, reactea.WithSize(20, 5))
+	app.Start()
+	app.Send(outer.Push(inner)())
+	app.Send(tea.KeyPressMsg{Code: 'a', Text: "a"})
+
+	if inner.Top() == nil {
+		t.Fatal("the inner modal was not opened")
+	}
+
+	app.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if inner.Top() != nil {
+		t.Error("the inner modal remained open")
+	}
+
+	if outer.Top() != inner {
+		t.Error("closing the inner modal closed the outer modal")
+	}
+}
+
+func TestStaleDismissDoesNotCloseANewerModal(t *testing.T) {
+	stack := modal.New(&base{})
+	app := reactea.New(stack, reactea.WithSize(20, 5))
+	app.Start()
+
+	first := &prompt{name: "first"}
+	app.Send(stack.Push(first)())
+	stale := modal.Dismiss(first.ctx)()
+	app.Send(stale)
+
+	second := &prompt{name: "second"}
+	app.Send(stack.Push(second)())
+	app.Send(stale)
+
+	if stack.Top() != second {
+		t.Error("an old dismiss closed a newer modal")
+	}
+}
+
+type sized struct {
+	reactea.BasicComponent
+	init, update [2]int
+}
+
+func (c *sized) Init(ctx *reactea.Ctx) tea.Cmd {
+	c.init[0], c.init[1] = ctx.Size()
+
+	return nil
+}
+
+func (c *sized) Update(ctx *reactea.Ctx, _ tea.Msg) tea.Cmd {
+	c.update[0], c.update[1] = ctx.Size()
+
+	return nil
+}
+
+func (c *sized) Render(*reactea.Ctx) string { return "" }
+
+func TestPlacedModalUsesItsBoxInEveryPhase(t *testing.T) {
+	stack := modal.New(&base{})
+	app := reactea.New(stack, reactea.WithSize(20, 10))
+	app.Start()
+
+	shown := &sized{}
+	app.Send(stack.PushAt(shown, modal.Centered(8, 3))())
+	app.Send(tickMsg{})
+
+	if shown.init != [2]int{8, 3} || shown.update != [2]int{8, 3} {
+		t.Errorf("sizes: Init=%v Update=%v, want [8 3]", shown.init, shown.update)
+	}
+}
+
+func TestUnmountClearsOpenModalsAndTheirCapture(t *testing.T) {
+	stack := modal.New(&base{})
+	app := reactea.New(&base{}, reactea.WithSize(20, 5))
+	scope := app.Scope().Child()
+	ctx := app.Ctx().WithScope(scope)
+
+	stack.Init(ctx)
+	stack.Update(ctx, stack.Push(&prompt{name: "MODAL"})())
+
+	if stack.Top() == nil || !app.InputCaptured() {
+		t.Fatal("the modal did not open and capture input")
+	}
+
+	scope.Close()
+
+	if stack.Top() != nil {
+		t.Error("an unmounted stack retained its modal")
+	}
+	if app.InputCaptured() {
+		t.Error("an unmounted stack retained its input capture")
 	}
 }

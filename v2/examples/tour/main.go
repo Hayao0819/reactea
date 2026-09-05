@@ -23,7 +23,7 @@ var (
 
 func main() {
 	app := reactea.New(
-		newRoot(),
+		modal.New(newRoot()),
 		reactea.WithRoute("/inbox"),
 		reactea.WithAltScreen(),
 		reactea.WithWindowTitle("reactea tour"),
@@ -37,8 +37,7 @@ func main() {
 type root struct {
 	reactea.Wrapper
 
-	stack *modal.Stack
-	body  *layout.Box
+	body *layout.Box
 }
 
 func newRoot() *root {
@@ -61,9 +60,7 @@ func newRoot() *root {
 		layout.Fixed(1, reactea.Text(" tab focus · c compose · q quit")),
 	)
 
-	stack := modal.New(body)
-
-	return &root{Wrapper: reactea.Wrap(stack), stack: stack, body: body}
+	return &root{Wrapper: reactea.Wrap(body), body: body}
 }
 
 func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
@@ -81,7 +78,7 @@ func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	case reactea.Key(msg, "q"):
 		return tea.Quit
 	case reactea.Key(msg, "c"):
-		return r.stack.Push(newCompose())
+		return modal.Push(ctx, newCompose())
 	case reactea.Key(msg, "tab"):
 		if !r.body.FocusNext() {
 			r.body.FocusFirst()
@@ -180,9 +177,9 @@ func newCompose() *compose {
 func (c *compose) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	switch {
 	case reactea.Key(msg, "enter"):
-		return modal.Return(c.input.Widget.Value())
+		return modal.Return(ctx, c.input.Widget.Value())
 	case reactea.Key(msg, "esc"):
-		return modal.Dismiss
+		return modal.Dismiss(ctx)
 	}
 
 	return c.Wrapper.Update(ctx, msg)

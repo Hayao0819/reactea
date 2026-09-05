@@ -279,11 +279,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, nil
 
-	case captureMsg:
-		a.addCapture(int(msg))
-
-		return a, nil
-
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
 

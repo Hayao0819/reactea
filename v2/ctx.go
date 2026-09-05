@@ -16,13 +16,17 @@ type Ctx struct {
 	x, y          int
 	width, height int
 	focused       bool
+
+	overlay Overlay
 }
 
 // Size is the box this component may draw into.
 func (c *Ctx) Size() (int, int) { return c.width, c.height }
 
+// Width is the horizontal size of this component's box.
 func (c *Ctx) Width() int { return c.width }
 
+// Height is the vertical size of this component's box.
 func (c *Ctx) Height() int { return c.height }
 
 // Origin is where this box sits on screen.
