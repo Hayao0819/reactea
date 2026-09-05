@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/Hayao0819/reactea/v2"
-	"github.com/Hayao0819/reactea/v2/internal/render"
+	"github.com/Hayao0819/reactea/v2/render"
 )
 
 // Direction is the axis a Box lays its items out along.
@@ -18,16 +18,23 @@ const (
 	Horizontal
 )
 
-// Item is one child and how much of the main axis it wants. A Size of 0 means
-// the item is flexible and takes a share of what is left, weighted by Grow.
+type sizing uint8
+
+const (
+	fixed sizing = iota
+	flexible
+)
+
+// Item is one child and how much of the main axis it wants.
 type Item struct {
-	Component reactea.Component
-
-	Size int
-	Grow int
-	Min  int
-	Max  int
-
+	component reactea.Component
+	sizing    sizing
+	size      int
+	weight    int
+	minimum   int
+	maximum   int
+	crossMin  int
+	key       string
 	focusable bool
 }
 
@@ -40,6 +47,54 @@ func (i Item) Focusable() Item {
 
 // IsFocusable reports what Focusable set, for code that rebuilds an item list.
 func (i Item) IsFocusable() bool { return i.focusable }
+
+// Key names the item, so a caller points at it rather than at an index a spacer
+// would shift.
+func (i Item) Key(key string) Item {
+	i.key = key
+
+	return i
+}
+
+// ItemKey reports what Key set.
+func (i Item) ItemKey() string { return i.key }
+
+// Bounds gives a growing item a minimum and maximum size. A zero maximum is
+// unbounded.
+func (i Item) Bounds(minimum, maximum int) Item {
+	if i.sizing != flexible {
+		panic("layout: bounds require a growing item")
+	}
+
+	if minimum < 0 || maximum < 0 || maximum > 0 && minimum > maximum {
+		panic("layout: invalid bounds")
+	}
+
+	i.minimum, i.maximum = minimum, maximum
+
+	return i
+}
+
+// MinCross reports the item as starved below size on the other axis.
+func (i Item) MinCross(size int) Item {
+	if size < 0 {
+		panic("layout: negative cross-axis minimum")
+	}
+
+	i.crossMin = size
+
+	return i
+}
+
+// sameItem decides whether the focus follows an item across SetItems. A key
+// answers for a component that == cannot compare at all.
+func sameItem(a, b Item) bool {
+	if a.key != "" || b.key != "" {
+		return a.key == b.key
+	}
+
+	return sameComponent(a.component, b.component)
+}
 
 // sameComponent compares without the == that would panic on a component whose
 // dynamic type is uncomparable. Losing the focus beats losing the program.
@@ -55,33 +110,36 @@ func sameComponent(a, b reactea.Component) bool {
 
 // Fixed gives the child exactly size cells on the main axis.
 func Fixed(size int, component reactea.Component) Item {
-	return Item{Component: component, Size: size}
+	if size < 0 {
+		panic("layout: negative fixed size")
+	}
+
+	return Item{component: component, sizing: fixed, size: size}
 }
 
 // Grow gives the child a share of what is left, proportional to weight.
 func Grow(weight int, component reactea.Component) Item {
-	return Item{Component: component, Grow: weight}
+	if weight <= 0 {
+		panic("layout: grow weight must be positive")
+	}
+
+	return Item{component: component, sizing: flexible, weight: weight}
 }
 
 // Spacer is blank space of exactly size cells on the main axis.
 func Spacer(size int) Item { return Fixed(size, reactea.Text("")) }
 
-// Bounded is Grow with a floor and a ceiling. A zero maximum means unbounded.
-func Bounded(weight, minimum, maximum int, component reactea.Component) Item {
-	return Item{Component: component, Grow: weight, Min: minimum, Max: maximum}
-}
-
-// Box lays its items out along one axis and gives each the full cross axis.
 // Focuser is a container that can move the focus among its children. Box
 // implements it, so nested boxes hand Tab down before advancing themselves.
 type Focuser = reactea.Focuser
 
+// Box lays its items out along one axis and gives each the full cross axis.
 type Box struct {
 	direction Direction
 	items     []Item
 
 	focused int
-	starved []int
+	starved []Starvation
 }
 
 // New builds a Box laying out along direction.
@@ -93,24 +151,25 @@ func New(direction Direction, items ...Item) *Box {
 	return box
 }
 
-// Items is what the box currently lays out.
-func (b *Box) Items() []Item { return b.items }
+// Items is a copy. Editing it changes nothing until it goes back through
+// SetItems.
+func (b *Box) Items() []Item { return append([]Item(nil), b.items...) }
 
 // SetItems replaces the children, which is how a pane is hidden, maximised or
 // reordered without rebuilding the tree and losing everyone's state. The focus
-// stays on the same component when it is still there.
+// stays on the same item when it is still there.
 func (b *Box) SetItems(items ...Item) {
-	var focused reactea.Component
+	var was Item
 
 	if b.focused >= 0 && b.focused < len(b.items) {
-		focused = b.items[b.focused].Component
+		was = b.items[b.focused]
 	}
 
 	b.items = items
 	b.focused = -1
 
 	for i := range items {
-		if sameComponent(items[i].Component, focused) && b.takesFocus(i) {
+		if sameItem(items[i], was) && b.takesFocus(i) {
 			b.focused = i
 
 			return
@@ -120,31 +179,97 @@ func (b *Box) SetItems(items ...Item) {
 	b.FocusFirst()
 }
 
-// Starved reports the items the last split had no room for: those handed nothing
-// at all, and those left below the Size or Min they asked for. A caller that
-// would rather hide a pane than draw it crushed reads this and decides — the box
-// itself never drops one. The slice is a copy; the box refills its own on every
-// phase, including a mouse move.
-func (b *Box) Starved() []int {
+// FocusKey moves the focus to the item named key, if it can take it.
+func (b *Box) FocusKey(key string) bool { return b.Focus(b.indexOf(key)) }
+
+// FocusedKey is empty when the focused item has no key, as well as when nothing
+// holds it.
+func (b *Box) FocusedKey() string {
+	if b.focused < 0 || b.focused >= len(b.items) {
+		return ""
+	}
+
+	return b.items[b.focused].key
+}
+
+// Replace swaps what an item draws and leaves its size, its bounds and its focus
+// alone.
+func (b *Box) Replace(key string, component reactea.Component) bool {
+	index := b.indexOf(key)
+	if index < 0 {
+		return false
+	}
+
+	b.items[index].component = component
+
+	return true
+}
+
+func (b *Box) indexOf(key string) int {
+	if key == "" {
+		return -1
+	}
+
+	for i := range b.items {
+		if b.items[i].key == key {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// StarveReason says which way an item came up short.
+type StarveReason int
+
+const (
+	// NoSpace is an item handed nothing at all.
+	NoSpace StarveReason = iota
+
+	// MainAxis is below the fixed size or minimum set with Item.Bounds.
+	MainAxis
+
+	// CrossAxis is below the minimum set with Item.MinCross.
+	CrossAxis
+)
+
+// Starvation is one item the last split had no room for.
+type Starvation struct {
+	Key    string
+	Index  int
+	Reason StarveReason
+}
+
+// Starved reports what the last split could not fit. A caller that would rather
+// hide a pane than draw it crushed reads this and decides; the box itself never
+// drops one. The slice is a copy, and the box refills its own on every phase,
+// including a mouse move.
+func (b *Box) Starved() []Starvation {
 	if len(b.starved) == 0 {
 		return nil
 	}
 
-	return append([]int(nil), b.starved...)
+	return append([]Starvation(nil), b.starved...)
 }
 
 // Focused is the index of the item holding the focus, or -1.
 func (b *Box) Focused() int { return b.focused }
 
-// Focus moves the focus to item index, if it can take it.
+// Focus moves the focus to item index, if it can take it. Focusing the item that
+// already holds it does nothing, so a click inside a pane cannot throw away
+// where that pane's own focus was.
 func (b *Box) Focus(index int) bool {
 	if index < 0 || index >= len(b.items) || !b.takesFocus(index) {
 		return false
 	}
 
+	if index == b.focused {
+		return true
+	}
+
 	b.focused = index
 
-	if child, ok := b.items[index].Component.(Focuser); ok {
+	if child, ok := b.items[index].component.(Focuser); ok {
 		child.FocusFirst()
 	}
 
@@ -159,9 +284,23 @@ func (b *Box) FocusNext() bool { return b.step(1) }
 // FocusPrev is FocusNext backwards; wrap it with FocusLast.
 func (b *Box) FocusPrev() bool { return b.step(-1) }
 
+// CycleNext moves forward and wraps to the first focusable item.
+func (b *Box) CycleNext() {
+	if !b.FocusNext() {
+		b.FocusFirst()
+	}
+}
+
+// CyclePrev moves backward and wraps to the last focusable item.
+func (b *Box) CyclePrev() {
+	if !b.FocusPrev() {
+		b.FocusLast()
+	}
+}
+
 func (b *Box) step(by int) bool {
 	if b.focused >= 0 && b.focused < len(b.items) {
-		if child, ok := b.items[b.focused].Component.(Focuser); ok {
+		if child, ok := b.items[b.focused].component.(Focuser); ok {
 			if (by > 0 && child.FocusNext()) || (by < 0 && child.FocusPrev()) {
 				return true
 			}
@@ -175,7 +314,7 @@ func (b *Box) step(by int) bool {
 
 		b.focused = i
 
-		if child, ok := b.items[i].Component.(Focuser); ok {
+		if child, ok := b.items[i].component.(Focuser); ok {
 			if by > 0 {
 				child.FocusFirst()
 			} else {
@@ -208,7 +347,7 @@ func (b *Box) takesFocus(i int) bool {
 		return true
 	}
 
-	nested, ok := b.items[i].Component.(Focuser)
+	nested, ok := b.items[i].component.(Focuser)
 
 	return ok && nested.HasFocusable()
 }
@@ -234,7 +373,7 @@ func (b *Box) Init(ctx *reactea.Ctx) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(b.items))
 
 	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
-		cmds = append(cmds, item.Component.Init(childCtx))
+		cmds = append(cmds, item.component.Init(childCtx))
 	})
 
 	return tea.Batch(cmds...)
@@ -255,7 +394,7 @@ func (b *Box) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(b.items))
 
 	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
-		cmds = append(cmds, item.Component.Update(childCtx, msg))
+		cmds = append(cmds, item.component.Update(childCtx, msg))
 	})
 
 	return tea.Batch(cmds...)
@@ -270,7 +409,7 @@ func (b *Box) routeKeyboard(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 
 	b.each(ctx, func(i int, item Item, childCtx *reactea.Ctx) {
 		if i == b.focused {
-			cmd = item.Component.Update(childCtx, msg)
+			cmd = item.component.Update(childCtx, msg)
 		}
 	})
 
@@ -312,7 +451,7 @@ func (b *Box) routeMouse(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 
 	offset := b.local(ctx, hitCtx, 0, 0)
 
-	return b.items[hit].Component.Update(hitCtx, reactea.TranslateMouse(msg, -offset.x, -offset.y))
+	return b.items[hit].component.Update(hitCtx, reactea.TranslateMouse(msg, -offset.x, -offset.y))
 }
 
 type point struct{ x, y int }
@@ -337,7 +476,7 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 			return
 		}
 
-		rendered = append(rendered, render.Fit(item.Component.Render(childCtx), width, height))
+		rendered = append(rendered, render.Fit(item.component.Render(childCtx), width, height))
 	})
 
 	if b.direction == Vertical {
@@ -381,8 +520,8 @@ func (b *Box) each(ctx *reactea.Ctx, visit func(int, Item, *reactea.Ctx)) {
 
 		// Measure what the child actually got: distribute can hand out more than
 		// the box holds, and Inset clamps the overflow away.
-		if got == 0 || (item.Size > 0 && got < item.Size) || (item.Min > 0 && got < item.Min) {
-			b.starved = append(b.starved, i)
+		if reason, short := starving(item, got, cross); short {
+			b.starved = append(b.starved, Starvation{Key: item.key, Index: i, Reason: reason})
 		}
 
 		position += sizes[i]
@@ -391,6 +530,19 @@ func (b *Box) each(ctx *reactea.Ctx, visit func(int, Item, *reactea.Ctx)) {
 	for i, item := range b.items {
 		visit(i, item, boxes[i])
 	}
+}
+
+func starving(item Item, main, cross int) (StarveReason, bool) {
+	switch {
+	case item.sizing == flexible && main == 0, item.sizing == fixed && item.size > 0 && main == 0:
+		return NoSpace, true
+	case item.sizing == fixed && main < item.size, item.minimum > 0 && main < item.minimum:
+		return MainAxis, true
+	case item.crossMin > 0 && cross < item.crossMin:
+		return CrossAxis, true
+	}
+
+	return 0, false
 }
 
 func distribute(total int, items []Item) []int {
@@ -406,15 +558,14 @@ func distribute(total int, items []Item) []int {
 	grow := make([]int, len(items))
 
 	for i, item := range items {
-		if item.Size > 0 {
-			sizes[i] = min(item.Size, remaining)
+		if item.sizing == fixed {
+			sizes[i] = min(item.size, remaining)
 			remaining -= sizes[i]
 
 			continue
 		}
 
-		// A flexible item with no weight still deserves a share.
-		grow[i] = max(item.Grow, 1)
+		grow[i] = item.weight
 		weight += grow[i]
 	}
 
@@ -434,7 +585,7 @@ func share(sizes []int, items []Item, grow []int, remaining, weight int) {
 	fractions := make([]int, len(items))
 
 	for i, item := range items {
-		if item.Size > 0 {
+		if item.sizing == fixed {
 			continue
 		}
 
@@ -448,7 +599,7 @@ func share(sizes []int, items []Item, grow []int, remaining, weight int) {
 		best, bestFraction := -1, -1
 
 		for i, item := range items {
-			if item.Size > 0 {
+			if item.sizing == fixed {
 				continue
 			}
 
@@ -467,48 +618,67 @@ func share(sizes []int, items []Item, grow []int, remaining, weight int) {
 }
 
 func clampSizes(sizes []int, items []Item, total int) {
-	free := make([]int, 0, len(items))
 	used := 0
 
 	for i, item := range items {
-		switch {
-		case item.Size > 0:
-		case item.Min > 0 && sizes[i] < item.Min:
-			sizes[i] = item.Min
-		case item.Max > 0 && sizes[i] > item.Max:
-			sizes[i] = item.Max
-		default:
-			free = append(free, i)
+		if item.sizing == flexible {
+			sizes[i] = bound(sizes[i], item)
 		}
 
 		used += sizes[i]
 	}
 
-	// Settle the difference clamping caused, one cell at a time so nothing goes
-	// negative and nothing is pushed below the Min it asked for. When even that
-	// leaves the items over the total, the box is simply too small: Ctx.Inset
-	// clamps the overflow away, and the items nearest the end lose out.
-	for used > total && len(free) > 0 {
-		moved := false
+	// One cell at a time, so nothing lands back outside the bound it was just
+	// brought inside. When nothing can move, the box is the wrong size for what it
+	// holds and Ctx.Inset clamps the overflow away.
+	at := 0
 
-		for _, i := range free {
-			if sizes[i] > items[i].Min && sizes[i] > 0 {
-				sizes[i]--
-				used--
-				moved = true
-
-				if used == total {
-					return
-				}
-			}
+	for used != total {
+		step := 1
+		if used > total {
+			step = -1
 		}
 
-		if !moved {
+		next, ok := nudge(sizes, items, step, at)
+		if !ok {
 			return
 		}
+
+		at, used = next+1, used+step
+	}
+}
+
+// bound is size brought inside the floor and ceiling item asked for.
+func bound(size int, item Item) int {
+	if item.minimum > 0 && size < item.minimum {
+		size = item.minimum
 	}
 
-	if used < total && len(free) > 0 {
-		sizes[free[0]] += total - used
+	if item.maximum > 0 && size > item.maximum {
+		size = item.maximum
 	}
+
+	return size
+}
+
+// nudge moves one cell into or out of the first flexible item from start that
+// can take it, wrapping once. Starting where the last call left off spreads the
+// difference around instead of piling it on item zero.
+func nudge(sizes []int, items []Item, step, start int) (int, bool) {
+	for offset := range items {
+		i := (start + offset) % len(items)
+
+		item := items[i]
+		if item.sizing == fixed {
+			continue
+		}
+
+		if size := sizes[i] + step; size >= 0 && size == bound(size, item) {
+			sizes[i] = size
+
+			return i, true
+		}
+	}
+
+	return 0, false
 }

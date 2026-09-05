@@ -54,7 +54,7 @@ func newRoot() *root {
 			return headerStyle.Width(ctx.Width()).Render(" reactea tour  " + ctx.Route())
 		})),
 		layout.Grow(1, layout.Row(
-			layout.Bounded(1, 12, 20, layout.Framed(paneStyle, newSidebar()).WhenFocused(focusedStyle)).Focusable(),
+			layout.Grow(1, layout.Framed(paneStyle, newSidebar()).WhenFocused(focusedStyle)).Bounds(12, 20).Focusable(),
 			layout.Grow(3, layout.Framed(paneStyle, pages).WhenFocused(focusedStyle)).Focusable(),
 		)),
 		layout.Fixed(1, reactea.Text(" tab focus · c compose · q quit")),
@@ -80,15 +80,11 @@ func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	case reactea.Key(msg, "c"):
 		return modal.Push(ctx, newCompose())
 	case reactea.Key(msg, "tab"):
-		if !r.body.FocusNext() {
-			r.body.FocusFirst()
-		}
+		r.body.CycleNext()
 
 		return nil
 	case reactea.Key(msg, "shift+tab"):
-		if !r.body.FocusPrev() {
-			r.body.FocusLast()
-		}
+		r.body.CyclePrev()
 
 		return nil
 	}

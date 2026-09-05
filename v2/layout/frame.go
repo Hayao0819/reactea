@@ -4,7 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/Hayao0819/reactea/v2"
-	"github.com/Hayao0819/reactea/v2/internal/render"
+	"github.com/Hayao0819/reactea/v2/render"
 )
 
 // Frame draws a lipgloss style around a component. Lipgloss counts Width and

@@ -147,17 +147,97 @@ func TestFixedLargerThanBoxIsTruncated(t *testing.T) {
 	}
 }
 
-func TestBoundedRespectsMinAndMax(t *testing.T) {
-	sizes := distribute(100, []Item{Bounded(1, 0, 20, &probe{}), Grow(1, &probe{})})
+func TestFixedZeroStaysHidden(t *testing.T) {
+	sizes := distribute(10, []Item{Fixed(0, &probe{}), Grow(1, &probe{})})
+
+	if sizes[0] != 0 || sizes[1] != 10 {
+		t.Errorf("sizes = %v, want [0 10]", sizes)
+	}
+
+	sizes = distribute(10, []Item{Spacer(0), Grow(1, &probe{})})
+	if sizes[0] != 0 || sizes[1] != 10 {
+		t.Errorf("zero spacer sizes = %v, want [0 10]", sizes)
+	}
+}
+
+func TestInvalidSizingPanics(t *testing.T) {
+	tests := map[string]func(){
+		"negative fixed size": func() { Fixed(-1, &probe{}) },
+		"zero grow weight":    func() { Grow(0, &probe{}) },
+		"negative minimum":    func() { Grow(1, &probe{}).Bounds(-1, 0) },
+		"reversed bounds":     func() { Grow(1, &probe{}).Bounds(4, 2) },
+		"bounds on fixed":     func() { Fixed(1, &probe{}).Bounds(0, 2) },
+	}
+
+	for name, run := range tests {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Error("invalid sizing did not panic")
+				}
+			}()
+
+			run()
+		})
+	}
+}
+
+func TestBoundsRespectMinAndMax(t *testing.T) {
+	sizes := distribute(100, []Item{Grow(1, &probe{}).Bounds(0, 20), Grow(1, &probe{})})
 
 	if sizes[0] != 20 || sizes[0]+sizes[1] != 100 {
 		t.Errorf("max: sizes = %v", sizes)
 	}
 
-	sizes = distribute(10, []Item{Bounded(1, 8, 0, &probe{}), Grow(9, &probe{})})
+	sizes = distribute(10, []Item{Grow(1, &probe{}).Bounds(8, 0), Grow(9, &probe{})})
 
 	if sizes[0] != 8 || sizes[0]+sizes[1] != 10 {
 		t.Errorf("min: sizes = %v", sizes)
+	}
+}
+
+// A floor and a ceiling in the same box used to lose the cells the ceiling gave
+// up: an item raised to its floor was struck off the list of those allowed to
+// take them, even with no ceiling of its own to stop it.
+func TestBoundsTogetherStillHandOutEveryCell(t *testing.T) {
+	cases := []struct {
+		name  string
+		total int
+		items []Item
+	}{
+		{"a ceiling beside a floor", 20, []Item{Grow(1, &probe{}).Bounds(0, 6), Grow(1, &probe{}).Bounds(12, 0)}},
+		{"two ceilings and a free item", 30, []Item{Grow(1, &probe{}).Bounds(0, 5), Grow(1, &probe{}).Bounds(0, 5), Grow(1, &probe{})}},
+		{"a floor beside a free item", 20, []Item{Grow(1, &probe{}).Bounds(15, 0), Grow(1, &probe{})}},
+		{"a fixed item and a floor", 20, []Item{Fixed(4, &probe{}), Grow(1, &probe{}).Bounds(14, 0)}},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			sizes := distribute(test.total, test.items)
+
+			used := 0
+			for _, size := range sizes {
+				used += size
+			}
+
+			if used != test.total {
+				t.Errorf("sizes %v hand out %d of %d cells", sizes, used, test.total)
+			}
+		})
+	}
+}
+
+// Settling what clamping left over used to go to the first item that took it,
+// whatever ceiling that item had asked for.
+func TestSettlingTheLeftoverRespectsEveryCeiling(t *testing.T) {
+	items := []Item{Grow(1, &probe{}).Bounds(0, 8), Grow(1, &probe{}).Bounds(0, 3)}
+
+	sizes := distribute(12, items)
+
+	for i, item := range items {
+		if item.maximum > 0 && sizes[i] > item.maximum {
+			t.Errorf("item %d got %d cells against a maximum of %d (%v)", i, sizes[i], item.maximum, sizes)
+		}
 	}
 }
 
@@ -282,6 +362,94 @@ func TestFocusSkipsItemsThatCannotTakeIt(t *testing.T) {
 	}
 }
 
+// uncomparable holds a map, so == on it panics and only a key can carry the
+// focus across SetItems.
+type uncomparable struct{ seen map[string]bool }
+
+func (c uncomparable) Init(*reactea.Ctx) tea.Cmd            { return nil }
+func (c uncomparable) Update(*reactea.Ctx, tea.Msg) tea.Cmd { return nil }
+func (c uncomparable) Render(*reactea.Ctx) string           { return "u" }
+
+// Rebuilding the list hands SetItems fresh components, so without keys the focus
+// falls back to the first pane rather than staying on the second.
+func TestTheFocusFollowsTheKeyWhenTheItemsAreRebuilt(t *testing.T) {
+	box := Column(
+		Grow(1, &probe{label: "l"}).Key("list").Focusable(),
+		Grow(1, &probe{label: "d"}).Key("detail").Focusable(),
+	)
+
+	box.FocusKey("detail")
+
+	box.SetItems(
+		Spacer(1),
+		Grow(1, &probe{label: "l"}).Key("list").Focusable(),
+		Fixed(1, &probe{label: "rule"}),
+		Grow(1, &probe{label: "d"}).Key("detail").Focusable(),
+	)
+
+	if got := box.FocusedKey(); got != "detail" {
+		t.Errorf("focused key = %q, want detail", got)
+	}
+
+	if got := box.Focused(); got != 3 {
+		t.Errorf("focused index = %d, want 3", got)
+	}
+}
+
+func TestAKeyOutlivesAComponentThatCannotBeCompared(t *testing.T) {
+	box := Column(
+		Grow(1, uncomparable{seen: map[string]bool{}}).Key("list").Focusable(),
+		Grow(1, uncomparable{seen: map[string]bool{}}).Key("detail").Focusable(),
+	)
+
+	box.FocusKey("detail")
+
+	box.SetItems(
+		Grow(1, uncomparable{seen: map[string]bool{}}).Key("list").Focusable(),
+		Grow(1, uncomparable{seen: map[string]bool{}}).Key("detail").Focusable(),
+	)
+
+	if got := box.FocusedKey(); got != "detail" {
+		t.Errorf("focused key = %q, want detail", got)
+	}
+}
+
+func TestReplaceSwapsTheComponentAndLeavesTheFocus(t *testing.T) {
+	before, after := &probe{label: "b"}, &probe{label: "a"}
+
+	box := Column(Fixed(1, &probe{label: "h"}), Grow(1, before).Key("pane").Focusable())
+
+	box.FocusKey("pane")
+
+	if !box.Replace("pane", after) {
+		t.Fatal("Replace found no item named pane")
+	}
+
+	if box.FocusedKey() != "pane" {
+		t.Errorf("Replace moved the focus to %q", box.FocusedKey())
+	}
+
+	app := reactea.New(box, reactea.WithSize(10, 4))
+
+	if rendered := box.Render(app.Ctx()); !strings.Contains(rendered, "a") {
+		t.Errorf("the box still draws the old component:\n%q", rendered)
+	}
+}
+
+func TestEditingWhatItemsReturnsChangesNothing(t *testing.T) {
+	kept := &probe{label: "k"}
+
+	box := Column(Grow(1, kept).Key("pane").Focusable())
+
+	items := box.Items()
+	items[0].component = &probe{label: "other"}
+	items[0].size = 99
+
+	if got := box.Items()[0]; got.component != kept || got.size != 0 {
+		t.Error("editing the returned slice reached into the box")
+	}
+}
+
 func TestFocusDescendsIntoNestedBoxes(t *testing.T) {
 	a, b, c := &probe{label: "a"}, &probe{label: "b"}, &probe{label: "c"}
 
@@ -303,6 +471,23 @@ func TestFocusDescendsIntoNestedBoxes(t *testing.T) {
 
 	if a.updates != 1 || b.updates != 1 || c.updates != 1 {
 		t.Errorf("updates = %d, %d, %d, want 1, 1, 1 (seen %v)", a.updates, b.updates, c.updates, seen)
+	}
+}
+
+func TestCycleFocusWraps(t *testing.T) {
+	box := Row(
+		Grow(1, &probe{label: "a"}).Focusable(),
+		Grow(1, &probe{label: "b"}).Focusable(),
+	)
+
+	box.CyclePrev()
+	if box.Focused() != 1 {
+		t.Errorf("CyclePrev focused %d, want 1", box.Focused())
+	}
+
+	box.CycleNext()
+	if box.Focused() != 0 {
+		t.Errorf("CycleNext focused %d, want 0", box.Focused())
 	}
 }
 
@@ -330,6 +515,29 @@ func TestMouseGoesToTheBoxUnderThePointer(t *testing.T) {
 
 	if box.Focused() != 1 {
 		t.Errorf("a press did not move the focus: %d", box.Focused())
+	}
+}
+
+// A press on a part of a pane that takes no focus used to send the pane's own
+// focus back to its first item, throwing away the row the user was on.
+func TestClickingWhereNothingTakesFocusLeavesTheInnerFocusAlone(t *testing.T) {
+	header, first, second := &probe{label: "h"}, &probe{label: "1"}, &probe{label: "2"}
+
+	inner := Column(Fixed(1, header), Fixed(1, first).Focusable(), Fixed(1, second).Focusable())
+	outer := Column(Grow(1, inner).Focusable())
+
+	app := reactea.New(outer, reactea.WithSize(10, 3))
+
+	inner.FocusLast()
+
+	if inner.Focused() != 2 {
+		t.Fatalf("inner focused = %d, want the last row", inner.Focused())
+	}
+
+	app.Update(tea.MouseClickMsg{X: 0, Y: 0, Button: tea.MouseLeft})
+
+	if inner.Focused() != 2 {
+		t.Errorf("clicking the header moved the inner focus to %d", inner.Focused())
 	}
 }
 
@@ -404,8 +612,8 @@ func TestEmptyNestedBoxIsNotFocusable(t *testing.T) {
 
 func TestSettlingNeverTakesAnItemBelowItsMin(t *testing.T) {
 	sizes := distribute(10, []Item{
-		Bounded(1, 8, 0, &probe{label: "a"}),
-		Bounded(1, 3, 0, &probe{label: "b"}),
+		Grow(1, &probe{label: "a"}).Bounds(8, 0),
+		Grow(1, &probe{label: "b"}).Bounds(3, 0),
 	})
 
 	if sizes[1] < 3 {
@@ -462,16 +670,26 @@ func TestSetItemsSurvivesUncomparableComponents(t *testing.T) {
 
 func TestStarvedNamesTheItemsThatLostOut(t *testing.T) {
 	box := Row(
-		Bounded(1, 12, 0, &probe{label: "a"}),
-		Bounded(1, 12, 0, &probe{label: "b"}),
-		Bounded(1, 12, 0, &probe{label: "c"}),
+		Grow(1, &probe{label: "a"}).Bounds(12, 0),
+		Grow(1, &probe{label: "b"}).Bounds(12, 0),
+		Grow(1, &probe{label: "c"}).Bounds(12, 0),
 	)
 
 	renderBox(box, 20, 1)
 
 	// 12, 8 and 0: the second is below its Min, the third got nothing.
-	if got := box.Starved(); len(got) != 2 || got[0] != 1 || got[1] != 2 {
-		t.Errorf("Starved() = %v, want [1 2]", got)
+	got := box.Starved()
+
+	if len(got) != 2 {
+		t.Fatalf("Starved() = %v, want two items", got)
+	}
+
+	if got[0].Index != 1 || got[0].Reason != MainAxis {
+		t.Errorf("the second item came back as %+v", got[0])
+	}
+
+	if got[1].Index != 2 || got[1].Reason != NoSpace {
+		t.Errorf("the third item came back as %+v", got[1])
 	}
 
 	renderBox(box, 40, 1)
@@ -486,15 +704,15 @@ func TestStarvedReportsAShortenedFixed(t *testing.T) {
 
 	renderBox(box, 20, 1)
 
-	if got := box.Starved(); len(got) != 1 || got[0] != 1 {
-		t.Errorf("Starved() = %v, want [1]", got)
+	if got := box.Starved(); len(got) != 1 || got[0].Index != 1 || got[0].Reason != MainAxis {
+		t.Errorf("Starved() = %+v, want the second item short on the main axis", got)
 	}
 }
 
 func TestStarvedIsACopy(t *testing.T) {
 	box := Row(
-		Bounded(1, 40, 0, &probe{label: "a"}),
-		Bounded(1, 40, 0, &probe{label: "b"}),
+		Grow(1, &probe{label: "a"}).Bounds(40, 0),
+		Grow(1, &probe{label: "b"}).Bounds(40, 0),
 	)
 
 	renderBox(box, 20, 1)
@@ -512,7 +730,7 @@ func TestStarvedIsACopy(t *testing.T) {
 		t.Fatalf("Starved() = %v in a box with room", box.Starved())
 	}
 
-	if len(kept) != 2 || kept[0] != 0 || kept[1] != 1 {
+	if len(kept) != 2 || kept[0].Index != 0 || kept[1].Index != 1 {
 		t.Errorf("a kept result changed under the caller: %v", kept)
 	}
 }
@@ -522,7 +740,7 @@ type starvedReader struct {
 	reactea.BasicComponent
 
 	box  *Box
-	seen []int
+	seen []Starvation
 }
 
 func (c *starvedReader) Render(*reactea.Ctx) string {
@@ -536,8 +754,8 @@ func TestStarvedIsSettledBeforeAnyChildRenders(t *testing.T) {
 
 	box := Column(
 		Fixed(1, reader),
-		Bounded(1, 40, 0, &probe{label: "a"}),
-		Bounded(1, 40, 0, &probe{label: "b"}),
+		Grow(1, &probe{label: "a"}).Bounds(40, 0),
+		Grow(1, &probe{label: "b"}).Bounds(40, 0),
 	)
 
 	reader.box = box
@@ -600,5 +818,30 @@ func TestSpacerTakesRoomAndDrawsNothing(t *testing.T) {
 
 	if content != "ab  cd" {
 		t.Errorf("content = %q, want %q", content, "ab  cd")
+	}
+}
+
+func TestMinCrossIsReportedWithoutChangingTheSplit(t *testing.T) {
+	wide := Grow(1, &probe{label: "wide"}).Key("wide").MinCross(40)
+
+	box := Column(wide)
+
+	renderBox(box, 20, 6)
+
+	got := box.Starved()
+
+	if len(got) != 1 {
+		t.Fatalf("Starved() = %+v, want the one narrow item", got)
+	}
+
+	if got[0].Key != "wide" || got[0].Reason != CrossAxis {
+		t.Errorf("starvation = %+v, want wide short across", got[0])
+	}
+
+	// A complaint, not a constraint: the box is still the size it was asked for.
+	renderBox(box, 60, 6)
+
+	if len(box.Starved()) != 0 {
+		t.Errorf("Starved() = %+v once there was room across", box.Starved())
 	}
 }
