@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Bubbletea v2 moved these onto the view. Reactea keeps them as commands so
+// Bubble Tea v2 moved these onto the view. reactea keeps them as commands so
 // Render stays a function of the component's state.
 type terminalMsg struct{ apply func(*tea.View) }
 

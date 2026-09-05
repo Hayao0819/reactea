@@ -65,7 +65,7 @@ func newRoot() *root {
 
 func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	// Global keys are read above the tree, so they stand down while something
-	// below is taking the keys. Ctrl+C is the exception, as always.
+	// below is taking the keys. Ctrl+C remains the application-level exit key.
 	if reactea.Key(msg, "ctrl+c") {
 		return tea.Quit
 	}

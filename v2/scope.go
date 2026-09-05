@@ -5,10 +5,8 @@ import (
 	"sync"
 )
 
-// Scope owns the cleanups of everything mounted under it. It replaces a Destroy
-// method on Component: a parent that mounts and unmounts children gives each a
-// Child scope, and everything else falls back to the app's root scope, so a
-// forgotten call cannot strand a cleanup.
+// Scope owns the cleanups of everything mounted under it. Parents give mounted
+// children a Child scope, while the app supplies the root scope.
 type Scope struct {
 	// A cleanup is easy to register from a tea.Cmd's goroutine, so the bookkeeping
 	// is guarded even though the event loop is the usual caller.
@@ -22,9 +20,8 @@ type Scope struct {
 	cancel context.CancelFunc
 }
 
-// Context is cancelled when this scope closes, so anything started under it
-// stops when the component goes away — no cancel func to hold and no cleanup to
-// remember.
+// Context is cancelled when this scope closes, tying background work to the
+// mounted component lifetime.
 func (s *Scope) Context() context.Context {
 	s.once.Do(func() {
 		s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -35,11 +32,11 @@ func (s *Scope) Context() context.Context {
 	return s.ctx
 }
 
-// NewScope opens a scope with no parent.
+// NewScope opens a root scope.
 func NewScope() *Scope { return &Scope{} }
 
 // Child opens a nested scope. Closing the parent closes it too; closing the
-// child early unmounts one thing without touching the rest.
+// child early limits cleanup to that branch.
 func (s *Scope) Child() *Scope {
 	child := NewScope()
 
@@ -52,9 +49,9 @@ func (s *Scope) Child() *Scope {
 		return child
 	}
 
-	// Drop closed ones so a long-lived parent does not collect a scope per route
-	// change. Closed takes the child's own lock: a child can be closed from a
-	// command's goroutine while its parent opens a sibling here.
+	// Compact closed scopes for long-lived parents. Closed takes the child's own
+	// lock because a command goroutine can close a child while its parent opens a
+	// sibling here.
 	live := s.children[:0]
 
 	for _, existing := range s.children {
@@ -87,7 +84,7 @@ func (s *Scope) OnDestroy(cleanup func()) {
 	s.mu.Unlock()
 }
 
-// Close runs the cleanups newest first. Closing twice is a no-op.
+// Close runs cleanups newest first and is idempotent.
 func (s *Scope) Close() {
 	s.mu.Lock()
 
@@ -120,8 +117,8 @@ func (s *Scope) Closed() bool {
 	return s.closed
 }
 
-// run isolates a cleanup: one that panics must not strand the ones registered
-// before it.
+// run isolates each cleanup so Close continues through the registered stack
+// after a panic.
 func run(cleanup func()) {
 	defer func() { _ = recover() }()
 

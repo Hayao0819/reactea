@@ -12,16 +12,15 @@ type Placement struct {
 // Center asks for the middle of the axis.
 const Center = -1
 
-// Overlay is a host that can put a component above whatever is already drawn.
-// modal.Stack is one; a component finds the nearest through its Ctx rather than
-// being handed a callback from wherever the host happens to be built.
+// Overlay is a host that can put a component above existing content.
+// modal.Stack implements it, and Ctx provides the nearest host to a component.
 type Overlay interface {
 	Push(component Component) tea.Cmd
 	PushAt(component Component, placement Placement) tea.Cmd
 }
 
-// WithOverlay names the host for this branch. A host installs itself as it
-// routes, so the nearest one wins and an unmounted one leaves nothing behind.
+// WithOverlay installs the host for this branch. Nested branches resolve to the
+// nearest mounted host.
 func (c *Ctx) WithOverlay(host Overlay) *Ctx {
 	child := *c
 	child.overlay = host

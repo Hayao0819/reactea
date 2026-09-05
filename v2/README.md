@@ -7,6 +7,18 @@ adds a component hierarchy, routing, layout and modals.
 go get github.com/Hayao0819/reactea/v2
 ```
 
+## Scope
+
+reactea supplies a component tree and lifecycle on top of Bubble Tea. Scopes
+bind cleanup to mounted components, and the app closes the root scope for Bubble
+Tea quit and interruption messages.
+
+Components receive `tea.Msg` values directly and return strings from `Render`.
+Containers route input by focus and pointer, then fit child output to the boxes
+they assign. Applications pass values such as stores and themes through
+constructors. `layout` divides one axis, applies item bounds and reports
+starvation.
+
 ## Quickstart
 
 ```go
@@ -15,7 +27,7 @@ type App struct {
 }
 
 func (a *App) Init(ctx *reactea.Ctx) tea.Cmd {
-	return tea.Batch(a.router.Init(ctx), reactea.EnterAltScreen)
+	return tea.Batch(a.router.Init(ctx), reactea.EnterAltScreen())
 }
 
 func (a *App) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
@@ -57,32 +69,33 @@ type Component interface {
 }
 ```
 
-Three methods, one argument in common. `BasicComponent` supplies no-op versions
-of `Init` and `Update`, so most components only write what they mean.
+Three methods, one argument in common. `BasicComponent` supplies default `Init`
+and `Update` implementations, so most components implement their relevant
+methods.
 
 A component that owns children forwards `Init` and `Update` to them and
 `Render`s them into whatever boxes it decides on. `layout` does this for you in
 the common cases.
 
-`Render` should be a function of the component's state. Terminal features are
-asked for with commands, not while drawing:
+`Render` should be a function of the component's state. Components request
+terminal features through commands:
 
 ```go
 func (c *App) Init(ctx *reactea.Ctx) tea.Cmd {
-	return tea.Batch(reactea.EnterAltScreen, reactea.SetWindowTitle("my-app"))
+	return tea.Batch(reactea.EnterAltScreen(), reactea.SetWindowTitle("my-app"))
 }
 ```
 
 `EnterAltScreen`, `ExitAltScreen`, `SetWindowTitle`, `SetMouseMode`,
 `SetReportFocus`, `SetBackgroundColor`, `SetForegroundColor` and
 `SetKeyboardEnhancements` all work this way: the App holds what was asked for and
-puts it on every frame. The cursor is the exception — it depends on the layout,
-which only exists while rendering — so it is set through the `Ctx`.
+puts it on every frame. Cursor coordinates depend on the current layout, so a
+component sets the cursor through its `Ctx` during rendering.
 
 ## Cleanup
 
-There is no `Destroy`. A component that owns a resource says so where it acquires
-it:
+Scopes bind cleanup to component lifetime. A component registers a resource
+where it acquires one:
 
 ```go
 func (c *Page) Init(ctx *reactea.Ctx) tea.Cmd {
@@ -93,8 +106,7 @@ func (c *Page) Init(ctx *reactea.Ctx) tea.Cmd {
 }
 ```
 
-For anything that runs in the background, take the scope's context instead of
-holding a cancel func:
+Background work uses the scope's context:
 
 ```go
 func (c *Page) Init(ctx *reactea.Ctx) tea.Cmd {
@@ -102,14 +114,13 @@ func (c *Page) Init(ctx *reactea.Ctx) tea.Cmd {
 }
 ```
 
-It is cancelled when the scope closes, so there is nothing to remember.
+Closing the scope cancels its context.
 
-Cleanups belong to a `Scope`. The app has a root scope that closes when the
-program ends — through `tea.Quit`, Ctrl+C or a signal alike — so nothing is
-stranded by a parent that forgot to forward a call. A parent that mounts and
-unmounts children gives each one `ctx.Scope().Child()` and closes it when the
-child goes; `router` and `modal` already do, so routing away from a page runs
-that page's cleanups and nothing else.
+Cleanups belong to a `Scope`. The app closes its root scope for `tea.Quit` and
+Bubble Tea interruption messages such as Ctrl+C or a termination signal. A
+parent that mounts and unmounts children gives each one `ctx.Scope().Child()`
+and closes it on unmount. `router` and `modal` manage these child scopes, so
+routing away from a page runs the cleanups registered by that page.
 
 ## Ctx
 
@@ -122,16 +133,20 @@ that page's cleanups and nothing else.
 | `Route()`, `PreviousRoute()` | where the app is |
 | `SetRoute(r)`, `Navigate(r)` | commands that move it |
 | `SetCursor`, `CursorAt` | where the terminal cursor goes this frame |
-| `OnDestroy`, `Scope`, `WithScope` | cleanup, and which scope it belongs to |
+| `OnDestroy`, `Context` | cleanup and cancellation when the component is unmounted |
 
-A cursor set through a `Ctx` is translated into screen coordinates
-automatically, however deep the component sits, so no parent does offset
-arithmetic. It is also per frame: a component that stops asking for the cursor
-gets a view without one, with no state to unwind.
+A cursor set through a `Ctx` is translated into screen coordinates at any depth.
+Cursor state is per frame and appears on each frame where a component requests
+it.
 
-Routing is a message, not a mutation. `SetRoute` and `Navigate` return commands,
-so they are safe to issue from a command goroutine, and the move arrives at the
-tree as a `RouteChangedMsg` where every other message arrives.
+Routing uses messages. `SetRoute` and `Navigate` return commands, so they are
+safe to issue from a command goroutine, and the route change reaches the tree as
+a `RouteChangedMsg`.
+
+Application components normally use the methods above. `Inset`, `WithFocus`,
+`WithScope`, `WithOverlay`, `Scope`, `Origin`, `IsInput`, `TranslateMouse` and
+`FocusOf` support containers that mount children or route input. `layout`,
+`router`, `modal`, `Frame` and `Wrapper` provide those container behaviours.
 
 ## Quitting
 
@@ -152,37 +167,53 @@ layout.Column(
 )
 ```
 
-`Box` pads or trims each child to the box it was given, so a child that renders
-short or long shifts nothing else; an item handed no cells is left out of the
-frame entirely. `Frame` trims the child to its inner box before drawing the
-border, so the border always has four sides.
+`Box` pads or trims each child to its assigned size, keeping sibling positions
+stable. Items assigned zero cells produce empty output. `Frame` trims the child
+to its inner box before drawing a complete border.
 
-`Box.Starved()` names the items the last split had no room for — handed nothing,
-or left under the `Size` or `Min` they asked for. It is settled before any child
-renders, so a header inside the same box can report it. The box never drops one on its own, so a dashboard
-that would rather hide a pane than draw it crushed reads this and calls
-`SetItems`.
+`Box.Starved()` reports unsatisfied items from the last split, each with its key
+and reason: zero assigned cells, a size below its fixed size or bounds, or a
+cross-axis size below `MinCross`. It is settled before any child renders, so a
+header inside the same box can report it. Applications can hide starved panes by
+updating the item list with `SetItems`.
+
+`MinCross` sets a bound on the cross axis and reports starvation. Every child
+receives the full cross-axis size.
 
 `Spacer(n)` is blank space of exactly n cells, for the gap between two panes.
 
-`Fixed` takes exactly that many cells — `Fixed(0, c)` is flexible, not hidden —
-`Grow` takes a share of what is left weighted against the other growing items,
-and `Bounded` is `Grow` with a floor and a ceiling that the split honours only
-while there is room for it. Every cell is handed out: the remainder from an uneven split goes
-to the items with the largest fractional share, so three `Grow(1, …)` items in a
-10-cell box get 4, 3 and 3.
+`Fixed` takes exactly that many cells, including zero. `Grow` takes a share of
+what is left weighted against the other growing items. Add a floor and ceiling
+with `Grow(1, child).Bounds(minimum, maximum)`; a zero maximum is unbounded.
+Every cell that a growing item can accept is handed out: the remainder from an
+uneven split goes to the items with the largest fractional share, so three
+`Grow(1, …)` items in a 10-cell box get 4, 3 and 3.
 
 `Framed` draws a lipgloss style around a component. Lipgloss counts `Width` and
 `Height` as the outer size, so the child is rendered at the box minus the border,
 padding and margin, and its cursor shifted to match.
 
 `Box.SetItems` replaces the children while the program runs — hiding a pane,
-maximising one, reordering them — and keeps the focus on the same component when
-it is still there. `Frame.SetStyle` does the same for a border. Neither rebuilds
-the tree, so nothing loses its state.
+maximising one or reordering them — while preserving focus and mounted
+component state. `Frame.SetStyle` updates a border while preserving its child.
 
-A `Box` recomputes its split in each phase rather than caching it from the last
-`Render`, so `Update` and `Render` can be called in any order.
+Name an item with `Key` for stable addressing across inserted spacers and
+reordered items:
+
+```go
+layout.Grow(1, pages).Key("pane").Focusable()
+
+box.FocusKey("pane")
+box.FocusedKey()
+box.Replace("pane", replacement)
+```
+
+`SetItems` matches on the key first, so focus follows a rebuilt item list and
+also supports components with uncomparable dynamic types. `Items()` returns a
+copy; apply changes by passing the edited copy to `SetItems`.
+
+A `Box` computes its split independently in each phase, allowing `Update` and
+`Render` in either order.
 
 ## Focus and input routing
 
@@ -202,64 +233,62 @@ body := layout.Row(
 )
 
 func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
-    if reactea.Key(msg, "tab") {
-        if !r.body.FocusNext() {
-            r.body.FocusFirst()
-        }
+	if reactea.Key(msg, "tab") {
+		r.body.CycleNext()
 
-        return nil
-    }
+		return nil
+	}
 
-    return r.body.Update(ctx, msg)
+	return r.body.Update(ctx, msg)
 }
 ```
 
-A `Box` with nothing focusable in it drops keyboard messages, so a component that
-expects keys must be marked `Focusable()` — otherwise it also never gets the
-cursor, since only a focused component may set one.
+`Box` delivers keyboard input and cursor ownership through its focused item.
+Mark each box child that accepts keyboard input with `Focusable()`.
 
-Capturing and focus are separate mechanisms: `CaptureInput` silences the root's
-global keys, it does not redirect them. Whatever captures must hold the focus
-too, or the keys go elsewhere. `ctx.CaptureInput()` ties the claim to the Ctx's
-scope, so a page routed away from mid-typing releases it automatically — even if
-the claim was still in flight when the scope closed. The package-level
-`reactea.CaptureInput` is the unscoped form and must be paired.
+Capturing and focus are separate mechanisms: `InputCapture` silences the root's
+global keys, while focus selects the input recipient. Give a capturing component
+focus while it accepts keyboard input.
 
 A container that wraps another passes the focus methods through — `Frame`,
 `Memo`, `reactea.Wrapper`, `router.Component` and `modal.Stack` all do, via
-`reactea.FocusOf` — so Tab reaches the panes inside a routed page rather than
-stopping at the router. Implement `reactea.Focuser` to put
-a container of your own in the same order.
+`reactea.FocusOf` — so Tab reaches panes inside routed pages. Implement
+`reactea.Focuser` to include a custom container in the same order.
 
-`FocusNext` descends into a nested box before advancing, and reports false at the
-end so the caller decides how to wrap. A component reads `ctx.Focused()` to style
-itself, and **only a focused component may set the cursor** — one cursor per frame
-falls out of the focus rules instead of being a race between siblings.
+`CycleNext` and `CyclePrev` descend into nested boxes and wrap at either end.
+`FocusNext` and `FocusPrev` expose the boundary for a container that needs to
+hand focus back to its parent. A component reads `ctx.Focused()` to style itself;
+the focused component owns the cursor.
 
 Global keys are read above the tree, so they have to stand down while something
 below is typing. A component that takes the keys says so, and the root asks:
 
 ```go
+type Filter struct {
+	reactea.InputCapture
+}
+
 // entering filter mode
-return reactea.CaptureInput
+return f.CaptureInput(ctx)
 
 // leaving it
-return reactea.ReleaseInput
+return f.ReleaseInput()
 
 func (r *root) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
-    if ctx.InputCaptured() {
-        return r.body.Update(ctx, msg)
-    }
-    ...
+	if ctx.InputCaptured() {
+		return r.body.Update(ctx, msg)
+	}
+	...
 }
 ```
 
-`modal.Stack` captures and releases on its own, so a modal needs nothing from the
-app. Calls nest, so a capture must be paired with a release.
+Each `InputCapture` owns one idempotent claim. Releasing it preserves other
+claims, and closing its scope releases it automatically. `modal.Stack` manages
+its claim itself.
 
 Mouse events arrive with box-local coordinates, so a click is `msg.Y` rows into
-your own pane. A press also moves the focus to what was pressed; a wheel or a
-motion leaves it alone.
+your own pane. A press moves focus to its target; wheel and motion events
+preserve current focus.
 
 ```go
 func (c *procs) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
@@ -279,24 +308,38 @@ func (c *procs) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 ```go
 router.NewWithRoutes(router.Routes{
 	"/user/settings": func(router.Params) reactea.Component { return settings.New() },
-	"/user/:id":      func(p router.Params) reactea.Component { return profile.New(p["id"]) },
+	"/user/:id":      func(p router.Params) reactea.Component { return profile.New(p.Get("id")) },
+	"/files/*rest":   func(p router.Params) reactea.Component { return files.New(p.Get("rest")) },
 	"default":        func(router.Params) reactea.Component { return home.New() },
 })
 ```
 
-Placeholders capture params (`:id`), may be optional (`?:id`) or a trailing
-catch-all (`+?:rest`). When more than one matches, the most specific wins —
+Placeholders capture params (`:id`), may be optional (`:id?`) or a trailing
+catch-all (`*rest`). `Params.Path()` returns the complete matched path. When
+more than one pattern matches, the most specific wins —
 literal over param over optional over catch-all, with a string tie-break, so the
-choice never depends on Go's map iteration order. Set `NotFound` for a page of
-your own; otherwise an unmatched route renders a plain message.
+choice is deterministic. Set `NotFound` to customize the page shown for an
+unmatched route; the default is a plain message.
+
+`Reload(ctx)` rebuilds the page inside the update it is called from, so the frame
+Bubble Tea draws next has one — which is what a configuration reload wants.
+`SetRoutes(routes, mode)` replaces the table: `PreserveCurrent` leaves a mounted
+page alone while its route still resolves the same way, and `RemountCurrent`
+builds it again.
 
 ## Modals
+
+Place one stack around the application root:
+
+```go
+app := reactea.New(modal.New(root))
+```
 
 ```go
 func (p *Page) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		return p.stack.Push(&NameInput{})
+		return modal.Push(ctx, &NameInput{})
 	case modal.Result[string]:
 		p.name = msg.Value
 	}
@@ -305,36 +348,57 @@ func (p *Page) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 }
 ```
 
+The package functions use `Ctx` to address the nearest stack:
+
+```go
+return modal.PushAt(ctx, &Confirm{}, modal.Centered(40, 8))
+```
+
+Each stack passes itself through `Ctx` while routing. In a nested stack, the
+inner value replaces the enclosing value for its component branch.
+
 A modal is an ordinary component pushed onto a `modal.Stack`. While it is on top
 it takes the input, though the base keeps receiving its own ticks and async
-results so its work can finish; it finishes with `modal.Return` or
-`modal.Fail`, which pops it and delivers a `modal.Result[T]` to the tree. Nothing
-blocks — no extra goroutine, no channel handshake. Each modal gets its own
-scope, so dismissing one runs exactly its cleanups.
+results so its work can finish; it finishes with `modal.Return(ctx, value)` or
+`modal.Fail(ctx, err)`, which closes that modal and delivers a `modal.Result[T]`
+to the tree. `modal.Dismiss(ctx)` closes it silently. Each modal gets its own
+scope, so dismissing one runs its registered cleanups.
 
 `Push` covers the whole box. `PushAt` puts the modal somewhere else and composites
 it over the base, so a confirmation can sit in the middle with the page still
 visible around it:
 
 ```go
-return p.stack.PushAt(&Confirm{}, modal.Placement{
-    X: modal.Center, Y: modal.Center, Width: 40, Height: 7,
-})
+return modal.PushAt(ctx, &Confirm{}, modal.Centered(40, 7))
 ```
 
-A zero `Width` or `Height` spans that axis. A modal is fitted to its placement
-the way a `Box` fits its children, so it is opaque over the base and cannot
-overrun the stack. Clicks beside a placed modal reach nobody: the base is covered
-as far as input goes, however much of it is visible, and it does not hold the
-focus while a modal is up — which is what keeps its cursor from showing through.
+A zero `Width` or `Height` spans that axis. The stack fits a modal to its
+placement and composites it opaquely over the base. While a modal is active, the
+stack owns input across its full area; pointer events outside the placement are
+absorbed, while the active modal owns focus and the cursor.
+
+## Fitting text
+
+`render` exports the terminal-cell operations used by the containers for reuse
+in application tables:
+
+```go
+render.Fit(content, width, height)   // both axes, pad or trim
+render.Left(text, width)             // one line, exactly that wide
+render.Right(text, width)
+render.Clip(text, width)             // trim to width
+```
+
+`Left` and `Right` trim by display width and then pad any remaining cell. This
+also handles clipping a double-width character at an odd boundary.
 
 ## Wrapping Bubble Tea models and bubbles widgets
 
-The two need different adapters, because a bubbles widget is not a `tea.Model`
-and never has been. A widget's `Update` returns its own concrete type
-(`func (m Model) Update(tea.Msg) (Model, tea.Cmd)`) so that you can write
-`m.input, cmd = m.input.Update(msg)` without a type assertion, and Go has no
-covariant returns. In v2 the `View() string` signature is a second mismatch.
+Bubble Tea models and bubbles widgets expose different method signatures. A
+widget's `Update` returns its concrete type
+(`func (m Model) Update(tea.Msg) (Model, tea.Cmd)`), while a `tea.Model` returns
+`tea.Model`; Bubble Tea v2 also uses a different `View` return type. Reactea
+provides an adapter for each shape.
 
 | | Wraps | Constraint |
 |---|---|---|
@@ -362,8 +426,8 @@ reactea.ReactifyWidget(vp).OnResize(func(v viewport.Model, w, h int) viewport.Mo
 })
 ```
 
-Widgets draw a virtual cursor into their string by default and report no real
-cursor in that mode; reactea leaves that choice to you.
+Widgets draw a virtual cursor into their string by default. Disabling the
+virtual cursor lets the adapter report the terminal cursor through `Ctx`.
 
 An interface whose `Update` returns the interface itself also fits `Widget[T]` —
 name it as the type argument, as in `ReactifyWidget[huh.Model](form)`.
@@ -387,23 +451,19 @@ takes the allocations from 11594 to 707:
 layout.Memo(pane, func() any { return snapshot.Generation })
 ```
 
-`Init` and `Update` always run — only drawing is skipped, so the child's state is
-never stale, its picture is merely reused. The cache is dropped when the key
-changes or the box is resized, and a **focused** pane is never cached at all:
-only a focused component may set the cursor, and it does that while drawing.
+`Init` and `Update` always run. The cache reuses render output until the key
+changes or the box is resized. A **focused** pane renders every frame so it can
+set the cursor.
 
-`SetItems` and `SetStyle` change what is drawn without moving any key, so call
-`Invalidate()` after either — the two features pull in opposite directions and
-the box has no way to find the `Memo` around it.
+Call `Invalidate()` after `SetItems` or `SetStyle`, because these external
+mutations are independent of the memoization key.
 
-What does hurt is treating Bubble Tea messages as a data bus. Every message walks
-the tree, so a dozen collectors each ticking their own results through `Update`
-multiplies that 37 µs by the number of sources and the depth of the tree. Have
-the collectors write to a store of your own and send the UI one redraw tick.
+Every Bubble Tea message walks the tree. For frequent data collection, write
+readings to an application store and send the UI a consolidated redraw tick.
 
 ## Testing
 
-An `App` runs without a terminal, which is all a component test needs.
+An `App` supports in-process component tests:
 
 ```go
 app := reactea.New(page, reactea.WithSize(70, 20), reactea.WithRoute("/inbox"))
@@ -416,11 +476,29 @@ if !strings.Contains(app.View().Content, "Reloading") {
 }
 ```
 
-`Start` runs `Init` and everything it produces; `Send` does the same for a
-message, until nothing is left, so a test sees the state a user would. Commands run inline: one that
-sleeps makes `Send` wait for it, so keep test intervals short.
+`Start` runs `Init` and its commands; `Send` handles a message and recursively
+runs commands until the queue settles. For timers and recurring commands, call
+`Init` or `Update` directly and deliver the event under test explicitly.
 
 `App.View()` returns the whole `tea.View`, so the cursor is assertable too. The
 alt-screen and the title arrive by command, so feed the batch `Init` returns back
-through `Update` before asserting on them. Two apps in one process share nothing,
-so tests can run in parallel.
+through `Update` before asserting on them. Each app owns isolated state, so tests
+can run in parallel.
+
+`testkit` provides common terminal-application test operations:
+
+```go
+testkit.SendKeys(app, "/", "e", "r", "enter")
+testkit.Click(app, 12, 3)
+
+if !strings.Contains(testkit.Plain(app), "3 results") {
+	t.Error(...)
+}
+```
+
+`Plain` strips the styling, `SendKeys` spells keys the way `KeyPressMsg.String`
+does, and `RenderAt` resizes before drawing.
+
+`App.ReverseBatches(true)` runs the commands inside every `tea.Batch` back to
+front. Bubble Tea permits either command order, so run ordering-sensitive tests
+in both modes.

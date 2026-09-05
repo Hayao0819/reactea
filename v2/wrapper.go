@@ -11,13 +11,12 @@ type Focuser interface {
 	FocusFirst()
 	FocusLast()
 
-	// HasFocusable reports whether there is anything inside to focus. A container
-	// that holds none must not be handed the focus, or keys would vanish into it.
+	// HasFocusable reports whether the container has a focus target.
 	HasFocusable() bool
 }
 
-// FocusOf is component's Focuser, or one that holds nothing. A container calls it
-// to forward the focus methods to whatever it wraps.
+// FocusOf returns the component's Focuser or an empty fallback. Containers use
+// it to forward focus methods to wrapped components.
 func FocusOf(component Component) Focuser {
 	if focuser, ok := component.(Focuser); ok {
 		return focuser
@@ -34,8 +33,8 @@ func (noFocus) FocusFirst()        {}
 func (noFocus) FocusLast()         {}
 func (noFocus) HasFocusable() bool { return false }
 
-// Wrapper forwards the whole lifecycle to a single child. Embed it and write
-// only the methods that differ.
+// Wrapper forwards the whole lifecycle to a single child. Embed it and override
+// selected methods.
 type Wrapper struct {
 	Child Component
 }

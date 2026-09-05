@@ -48,8 +48,7 @@ func (i Item) Focusable() Item {
 // IsFocusable reports what Focusable set, for code that rebuilds an item list.
 func (i Item) IsFocusable() bool { return i.focusable }
 
-// Key names the item, so a caller points at it rather than at an index a spacer
-// would shift.
+// Key gives the item a stable name across reordered items and inserted spacers.
 func (i Item) Key(key string) Item {
 	i.key = key
 
@@ -86,8 +85,8 @@ func (i Item) MinCross(size int) Item {
 	return i
 }
 
-// sameItem decides whether the focus follows an item across SetItems. A key
-// answers for a component that == cannot compare at all.
+// sameItem decides whether focus follows an item across SetItems. Keys support
+// components with uncomparable dynamic types.
 func sameItem(a, b Item) bool {
 	if a.key != "" || b.key != "" {
 		return a.key == b.key
@@ -96,8 +95,7 @@ func sameItem(a, b Item) bool {
 	return sameComponent(a.component, b.component)
 }
 
-// sameComponent compares without the == that would panic on a component whose
-// dynamic type is uncomparable. Losing the focus beats losing the program.
+// sameComponent guards == with the dynamic type's comparability.
 func sameComponent(a, b reactea.Component) bool {
 	if a == nil || b == nil {
 		return false
@@ -151,13 +149,11 @@ func New(direction Direction, items ...Item) *Box {
 	return box
 }
 
-// Items is a copy. Editing it changes nothing until it goes back through
-// SetItems.
+// Items returns a copy for editing and passing back to SetItems.
 func (b *Box) Items() []Item { return append([]Item(nil), b.items...) }
 
-// SetItems replaces the children, which is how a pane is hidden, maximised or
-// reordered without rebuilding the tree and losing everyone's state. The focus
-// stays on the same item when it is still there.
+// SetItems replaces the children while preserving mounted component state. It
+// also preserves focus when the focused item remains present.
 func (b *Box) SetItems(items ...Item) {
 	var was Item
 
@@ -182,8 +178,8 @@ func (b *Box) SetItems(items ...Item) {
 // FocusKey moves the focus to the item named key, if it can take it.
 func (b *Box) FocusKey(key string) bool { return b.Focus(b.indexOf(key)) }
 
-// FocusedKey is empty when the focused item has no key, as well as when nothing
-// holds it.
+// FocusedKey returns the focused item's key, or an empty string for an unkeyed
+// item or empty focus.
 func (b *Box) FocusedKey() string {
 	if b.focused < 0 || b.focused >= len(b.items) {
 		return ""
@@ -192,8 +188,7 @@ func (b *Box) FocusedKey() string {
 	return b.items[b.focused].key
 }
 
-// Replace swaps what an item draws and leaves its size, its bounds and its focus
-// alone.
+// Replace swaps an item's component while preserving its size, bounds and focus.
 func (b *Box) Replace(key string, component reactea.Component) bool {
 	index := b.indexOf(key)
 	if index < 0 {
@@ -223,7 +218,7 @@ func (b *Box) indexOf(key string) int {
 type StarveReason int
 
 const (
-	// NoSpace is an item handed nothing at all.
+	// NoSpace means the item received zero cells.
 	NoSpace StarveReason = iota
 
 	// MainAxis is below the fixed size or minimum set with Item.Bounds.
@@ -233,17 +228,16 @@ const (
 	CrossAxis
 )
 
-// Starvation is one item the last split had no room for.
+// Starvation describes an unsatisfied item size from the last split.
 type Starvation struct {
 	Key    string
 	Index  int
 	Reason StarveReason
 }
 
-// Starved reports what the last split could not fit. A caller that would rather
-// hide a pane than draw it crushed reads this and decides; the box itself never
-// drops one. The slice is a copy, and the box refills its own on every phase,
-// including a mouse move.
+// Starved reports unsatisfied items from the last split. Applications can use
+// the result to hide compressed panes. The returned slice is a copy, and every
+// phase refreshes the result, including a mouse move.
 func (b *Box) Starved() []Starvation {
 	if len(b.starved) == 0 {
 		return nil
@@ -255,9 +249,8 @@ func (b *Box) Starved() []Starvation {
 // Focused is the index of the item holding the focus, or -1.
 func (b *Box) Focused() int { return b.focused }
 
-// Focus moves the focus to item index, if it can take it. Focusing the item that
-// already holds it does nothing, so a click inside a pane cannot throw away
-// where that pane's own focus was.
+// Focus moves focus to item index when the item accepts it. Repeated focus keeps
+// the pane's existing descendant focus.
 func (b *Box) Focus(index int) bool {
 	if index < 0 || index >= len(b.items) || !b.takesFocus(index) {
 		return false
@@ -277,8 +270,7 @@ func (b *Box) Focus(index int) bool {
 }
 
 // FocusNext moves to the next focusable leaf, descending into a nested box
-// first. It reports false when there is nothing further, which is the caller's
-// cue to wrap with FocusFirst.
+// first. False marks the boundary where a caller can wrap with FocusFirst.
 func (b *Box) FocusNext() bool { return b.step(1) }
 
 // FocusPrev is FocusNext backwards; wrap it with FocusLast.
@@ -442,8 +434,7 @@ func (b *Box) routeMouse(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	// A press moves the focus to whatever was pressed, the way every pointer UI
-	// behaves. A wheel or a motion leaves it alone.
+	// A press moves focus to its target. Wheel and motion events preserve it.
 	if _, press := msg.(tea.MouseClickMsg); press && b.takesFocus(hit) {
 		b.Focus(hit)
 		hitCtx = hitCtx.WithFocus(ctx.Focused())
@@ -470,8 +461,7 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 	b.each(ctx, func(_ int, item Item, childCtx *reactea.Ctx) {
 		width, height := childCtx.Size()
 
-		// An item with no cells on the main axis is left out entirely; joining its
-		// empty string would still cost a row or a column.
+		// Skip a zero-sized main axis during the join.
 		if (b.direction == Vertical && height <= 0) || (b.direction == Horizontal && width <= 0) {
 			return
 		}
@@ -486,10 +476,9 @@ func (b *Box) Render(ctx *reactea.Ctx) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-// The split is recomputed per phase rather than cached, so Update and Render can
-// be called in any order. Every child's box, and the record of who went short,
-// is settled before the first one is visited, so an item that reads Starved
-// during its own Render sees the whole answer.
+// Each phase computes its own split, allowing Update and Render in either order.
+// Every child's box and all starvation records are settled before the first
+// child is visited.
 func (b *Box) each(ctx *reactea.Ctx, visit func(int, Item, *reactea.Ctx)) {
 	width, height := ctx.Size()
 
@@ -628,9 +617,8 @@ func clampSizes(sizes []int, items []Item, total int) {
 		used += sizes[i]
 	}
 
-	// One cell at a time, so nothing lands back outside the bound it was just
-	// brought inside. When nothing can move, the box is the wrong size for what it
-	// holds and Ctx.Inset clamps the overflow away.
+	// Move one cell at a time to keep adjusted sizes inside their bounds. Ctx.Inset
+	// clamps overflow from a fully constrained box.
 	at := 0
 
 	for used != total {
@@ -662,8 +650,8 @@ func bound(size int, item Item) int {
 }
 
 // nudge moves one cell into or out of the first flexible item from start that
-// can take it, wrapping once. Starting where the last call left off spreads the
-// difference around instead of piling it on item zero.
+// can take it, wrapping once. Continuing from the previous position distributes
+// the difference across items.
 func nudge(sizes []int, items []Item, step, start int) (int, bool) {
 	for offset := range items {
 		i := (start + offset) % len(items)

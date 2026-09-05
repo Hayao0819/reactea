@@ -28,7 +28,7 @@ type inputCaptureState struct {
 }
 
 // CaptureInput claims global input until ReleaseInput is called or ctx's scope
-// closes. Repeated calls for the same scope do nothing.
+// closes. Repeated calls for the same scope are idempotent.
 func (c *InputCapture) CaptureInput(ctx *Ctx) tea.Cmd {
 	if c.state == nil {
 		c.state = &inputCaptureState{}
@@ -57,7 +57,7 @@ func (c *InputCapture) CaptureInput(ctx *Ctx) tea.Cmd {
 	return nil
 }
 
-// ReleaseInput releases this capture. Repeated calls do nothing.
+// ReleaseInput releases this capture and is idempotent.
 func (c *InputCapture) ReleaseInput() tea.Cmd {
 	if c.state == nil {
 		return nil
@@ -98,8 +98,7 @@ func IsMouse(msg tea.Msg) bool {
 	return ok
 }
 
-// IsInput reports whether msg is addressed to one component rather than to all
-// of them.
+// IsInput reports whether msg has a single component as its addressee.
 func IsInput(msg tea.Msg) bool { return IsKeyboard(msg) || IsMouse(msg) }
 
 // TranslateMouse moves a mouse event into a child's coordinate space. A
@@ -131,7 +130,7 @@ func TranslateMouse(msg tea.Msg, dx, dy int) tea.Msg {
 	return msg
 }
 
-// MouseAt returns where msg landed, if it is a mouse event at all.
+// MouseAt returns the coordinates and type-match result for a mouse event.
 func MouseAt(msg tea.Msg) (x, y int, ok bool) {
 	mouse, isMouse := msg.(tea.MouseMsg)
 	if !isMouse {

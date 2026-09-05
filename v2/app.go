@@ -12,20 +12,18 @@ type RouteChangedMsg struct {
 	To   string
 }
 
-// A message rather than a direct mutation, so a route change is safe from any
-// goroutine.
+// routeRequestMsg carries a route mutation safely from any goroutine.
 type routeRequestMsg struct {
 	target   string
 	relative bool
 }
 
-// Bubbletea returns on QuitMsg before Update sees it, so this filter hop is what
+// Bubble Tea returns on QuitMsg before Update sees it, so this filter hop is what
 // closes the root scope.
 type teardownMsg struct{ next tea.Msg }
 
-// App owns a running program's state. It lives here rather than in package
-// variables, so two apps in one process never share a route. Commands go
-// straight back to Bubbletea, which already runs them under a panic guard.
+// App owns a running program's state. Each instance has isolated route,
+// terminal and input-capture state.
 type App struct {
 	root  Component
 	scope *Scope
@@ -39,8 +37,7 @@ type App struct {
 
 	tornDown bool
 
-	// A scope-bound claim is released wherever its scope closes, which need not
-	// be the event loop reading the count.
+	// Scope cleanup can release a claim concurrently with the event loop.
 	capturesMu sync.Mutex
 	captures   int
 
@@ -52,7 +49,7 @@ type App struct {
 // Option configures an App.
 type Option func(*App)
 
-// WithRoute starts the app on route instead of "/".
+// WithRoute sets the app's initial route; the default is "/".
 func WithRoute(route string) Option {
 	return func(a *App) {
 		a.route, a.previousRoute = route, route
@@ -66,7 +63,7 @@ func WithSize(width, height int) Option {
 	}
 }
 
-// WithTerminal seeds terminal state before the first frame. Bubbletea renders
+// WithTerminal seeds terminal state before the first frame. Bubble Tea renders
 // once before running Init's commands, so asking with a command alone flashes a
 // frame onto the primary screen.
 func WithTerminal(apply func(*tea.View)) Option {
@@ -99,25 +96,23 @@ func New(root Component, options ...Option) *App {
 	return app
 }
 
-// Program wraps the app in a Bubbletea program. Any quit closes the root scope
-// first.
+// Program wraps the app in a Bubble Tea program. QuitMsg and InterruptMsg close
+// the root scope first.
 func (a *App) Program(options ...tea.ProgramOption) *tea.Program {
 	options = append(options, tea.WithFilter(a.filter))
 
 	return tea.NewProgram(a, options...)
 }
 
-// sendRounds bounds one Send, so a command that reschedules itself cannot spin
-// forever in a test.
+// sendRounds bounds command processing for one Send.
 const sendRounds = 100
 
-// Send delivers msg and runs whatever it produces, and what that produces, until
-// nothing is left — so a test sees the state a user would after the same event.
-// It is the loop a test would otherwise write by hand.
+// Send delivers msg and recursively runs commands until the queue settles, so a
+// test sees the state a user would after the same event.
 //
 // Commands run inline: one that sleeps makes Send wait for it, so keep test
 // intervals short. A command that keeps rescheduling itself panics after a
-// hundred rounds rather than hanging the test.
+// hundred rounds.
 func (a *App) Send(msgs ...tea.Msg) {
 	pending := make([]tea.Cmd, 0, len(msgs))
 
@@ -129,9 +124,8 @@ func (a *App) Send(msgs ...tea.Msg) {
 	a.drain(pending...)
 }
 
-// ReverseBatches makes Send run the commands inside a tea.Batch back to front.
-// Bubble Tea promises no order among them, so a test that only ever sees them
-// in order can bake in an ordering production does not have.
+// ReverseBatches makes Send run the commands inside a tea.Batch back to front,
+// allowing tests to exercise both orders permitted by Bubble Tea.
 func (a *App) ReverseBatches(on bool) { a.reverseBatches = on }
 
 func (a *App) drain(pending ...tea.Cmd) {
@@ -179,8 +173,8 @@ func (a *App) order(batch tea.BatchMsg) []tea.Cmd {
 	return reversed
 }
 
-// Start runs Init and everything it produces, the way a program would before its
-// first frame. Tests use it instead of driving Init by hand.
+// Start runs Init and its command chain as a program would before its first
+// frame. Tests call it to reproduce that lifecycle.
 func (a *App) Start() {
 	a.drain(a.Init())
 }
@@ -210,7 +204,7 @@ func (a *App) addCapture(delta int) {
 	a.captures = max(0, a.captures+delta)
 }
 
-// Scope is the app's root scope. It closes when the program ends.
+// Scope is the app's root scope. QuitMsg and InterruptMsg close it.
 func (a *App) Scope() *Scope { return a.scope }
 
 // Ctx is the root context: the whole screen, bound to the root scope.
@@ -230,8 +224,7 @@ func (a *App) setRoute(target string) (RouteChangedMsg, bool) {
 	return changed, true
 }
 
-// filter runs before the event loop inspects a message, the only place a quit
-// can be intercepted.
+// filter intercepts quit messages before the event loop handles them.
 func (a *App) filter(_ tea.Model, msg tea.Msg) tea.Msg {
 	if a.tornDown {
 		return msg
@@ -251,8 +244,8 @@ func (a *App) Init() tea.Cmd {
 	return a.root.Init(a.Ctx())
 }
 
-// Bubbletea's only recover is around Run, which never reaches the model, so
-// without this a panicking component strands every cleanup in the tree.
+// closeOnPanic closes component scopes before propagating a panic to Bubble
+// Tea's runner.
 func (a *App) closeOnPanic() {
 	if r := recover(); r != nil {
 		a.scope.Close()

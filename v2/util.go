@@ -2,8 +2,8 @@ package reactea
 
 import tea "charm.land/bubbletea/v2"
 
-// Reactified adapts a tea.Model. A bubbles widget returns its own concrete type
-// from Update, so it never satisfies tea.Model; use ReactifyWidget for those.
+// Reactified adapts a tea.Model. ReactifyWidget handles bubbles widgets whose
+// Update method returns a concrete widget type.
 type Reactified[TModel tea.Model] struct {
 	BasicComponent
 
@@ -22,8 +22,7 @@ func (c *Reactified[TModel]) Init(*Ctx) tea.Cmd {
 }
 
 func (c *Reactified[TModel]) Update(ctx *Ctx, msg tea.Msg) tea.Cmd {
-	// The app broadcasts the terminal's size; a nested model must be told its own
-	// box instead, or it draws as if it owned the screen.
+	// Translate the terminal size broadcast to the nested model's own box.
 	if _, ok := msg.(tea.WindowSizeMsg); ok {
 		width, height := ctx.Size()
 		msg = tea.WindowSizeMsg{Width: width, Height: height}
@@ -77,9 +76,7 @@ func ReactifyWidget[TWidget Widget[TWidget]](widget TWidget) *ReactifiedWidget[T
 	return &ReactifiedWidget[TWidget]{Widget: widget}
 }
 
-// OnResize is how a widget learns the size of the box it is drawn into. Widgets
-// spell their setters differently — SetWidth, Width, a field — so reactea asks
-// for a function rather than guessing.
+// OnResize tells a widget the size of its box through its native setters.
 //
 //	reactea.ReactifyWidget(vp).OnResize(func(v viewport.Model, w, h int) viewport.Model {
 //	    v.SetWidth(w)
@@ -93,8 +90,8 @@ func (c *ReactifiedWidget[TWidget]) OnResize(resize func(TWidget, int, int) TWid
 	return c
 }
 
-// Only some widgets (timer, stopwatch, filepicker, progress) have an Init, which
-// is why it is not part of Widget.
+// Init invokes the optional initializer implemented by widgets such as timer,
+// stopwatch, filepicker and progress.
 func (c *ReactifiedWidget[TWidget]) Init(*Ctx) tea.Cmd {
 	if initializer, ok := any(c.Widget).(interface{ Init() tea.Cmd }); ok {
 		return initializer.Init()
@@ -112,8 +109,7 @@ func (c *ReactifiedWidget[TWidget]) Update(_ *Ctx, msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// A widget exposes Cursor() separately from View(), and only once its virtual
-// cursor is off and it is focused. Reactea forces neither.
+// Render forwards a widget's optional real cursor through Ctx.
 func (c *ReactifiedWidget[TWidget]) Render(ctx *Ctx) string {
 	if width, height := ctx.Size(); c.resize != nil && (width != c.width || height != c.height) {
 		c.width, c.height = width, height

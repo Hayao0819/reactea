@@ -19,8 +19,8 @@ type Routes = map[string]RouteInitializer
 type ReloadMode int
 
 const (
-	// PreserveCurrent leaves a mounted page alone while its route still resolves
-	// to the same entry, which is what a table that only ever grows wants.
+	// PreserveCurrent keeps a mounted page while its route resolves to the same
+	// entry.
 	PreserveCurrent ReloadMode = iota
 
 	// RemountCurrent tears the page down and builds it again from the new table.
@@ -29,7 +29,7 @@ const (
 
 // Component renders whichever route matches, remounting when the match changes.
 type Component struct {
-	// NotFound renders when nothing matched and there is no "default" route.
+	// NotFound renders as the fallback after route patterns and the default entry.
 	NotFound reactea.RenderFunc
 
 	routes Routes
@@ -46,8 +46,8 @@ func New() *Component { return &Component{} }
 // NewWithRoutes builds a router from routes.
 func NewWithRoutes(routes Routes) *Component { return &Component{routes: routes} }
 
-// SetRoutes replaces the table. It takes no Ctx because a table is often built
-// before anything is mounted; RemountCurrent takes effect on the next Update.
+// SetRoutes replaces the table and can be called before mounting.
+// RemountCurrent takes effect on the next Update.
 func (c *Component) SetRoutes(routes Routes, mode ReloadMode) {
 	c.routes = routes
 
@@ -56,20 +56,17 @@ func (c *Component) SetRoutes(routes Routes, mode ReloadMode) {
 	}
 }
 
-// Reload rebuilds the page in this update, so the frame Bubble Tea draws next
-// has one. Unmounting alone would leave the router empty until a message
-// arrived.
+// Reload rebuilds the page during this update for the next Bubble Tea frame.
 func (c *Component) Reload(ctx *reactea.Ctx) tea.Cmd {
 	c.Unmount()
 
 	return c.sync(ctx)
 }
 
-// Current is the routed component, or nil when nothing matched.
+// Current is the routed component, or nil for an unmatched route.
 func (c *Component) Current() reactea.Component { return c.current }
 
-// The focus methods reach the routed page, so Tab can move among the panes
-// inside it rather than stopping at the router.
+// The focus methods reach the routed page, so Tab can move among its panes.
 func (c *Component) FocusNext() bool { return reactea.FocusOf(c.current).FocusNext() }
 
 func (c *Component) FocusPrev() bool { return reactea.FocusOf(c.current).FocusPrev() }
@@ -84,8 +81,7 @@ func (c *Component) Init(ctx *reactea.Ctx) tea.Cmd {
 	return c.sync(ctx)
 }
 
-// Unmount closes the page's scope. The router does this on every route change;
-// an enclosing component does not have to.
+// Unmount closes the page's scope. The router calls it on every route change.
 func (c *Component) Unmount() {
 	if c.scope != nil {
 		c.scope.Close()
@@ -111,8 +107,8 @@ func (c *Component) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 }
 
 func (c *Component) Render(ctx *reactea.Ctx) string {
-	// Mounting here would throw away the page's Init command, so a router that
-	// has never been through Init or Update renders not-found until it has.
+	// Init or Update performs mounting so the page's Init command enters the event
+	// loop. Render uses the fallback until that first lifecycle call.
 	if c.current != nil {
 		return c.current.Render(ctx.WithScope(c.scope))
 	}
@@ -124,8 +120,8 @@ func (c *Component) Render(ctx *reactea.Ctx) string {
 	return fmt.Sprintf("Couldn't route for %q", ctx.Route())
 }
 
-// A route change resolving to the same page leaves it mounted, so a nested
-// router does not tear down its parent's page.
+// A route change resolving to the same page preserves its mount, including the
+// parent page of a nested router.
 func (c *Component) sync(ctx *reactea.Ctx) tea.Cmd {
 	placeholder, initializer, params, ok := c.resolve(ctx.Route())
 
@@ -141,8 +137,7 @@ func (c *Component) sync(ctx *reactea.Ctx) tea.Cmd {
 
 	c.placeholder, c.params = placeholder, params
 
-	// Its own scope, so the next route change tears down this page and nothing
-	// else.
+	// A child scope limits the next route change's cleanup to this page.
 	c.scope = ctx.Scope().Child()
 	c.current = initializer(params)
 
@@ -285,7 +280,7 @@ func compareSpecificity(a, b []int) int {
 	}
 }
 
-// Page adapts a constructor that takes no route params.
+// Page adapts a parameterless route constructor.
 func Page[TComponent reactea.Component](construct func() TComponent) RouteInitializer {
 	return func(Params) reactea.Component { return construct() }
 }

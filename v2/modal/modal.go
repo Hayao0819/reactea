@@ -1,6 +1,5 @@
-// Package modal stacks blocking overlays on a base component. A modal finishes
-// with Return, which pops it and delivers its answer as an ordinary message, so
-// nothing here blocks the event loop.
+// Package modal stacks input-capturing overlays on a base component. Return pops
+// the modal and delivers its answer through the Bubble Tea event loop.
 package modal
 
 import (
@@ -49,7 +48,7 @@ func PushAt(ctx *reactea.Ctx, component reactea.Component, placement Placement) 
 	return host.PushAt(component, placement)
 }
 
-// Dismiss closes the modal associated with ctx without an answer.
+// Dismiss silently closes the modal associated with ctx.
 func Dismiss(ctx *reactea.Ctx) tea.Cmd { return close(ctx, nil) }
 
 // Return closes the modal associated with ctx and delivers value.
@@ -76,8 +75,8 @@ func close(ctx *reactea.Ctx, result tea.Cmd) tea.Cmd {
 	return bound.CloseOverlay(result)
 }
 
-// Placement is where a modal sits inside the stack's box. It lives in the root
-// package so that Ctx can name it without importing this one.
+// Placement is where a modal sits inside the stack's box. The root package owns
+// the shared type and keeps the package dependency acyclic.
 type Placement = reactea.Placement
 
 // Center asks for the middle of the axis.
@@ -141,8 +140,7 @@ func (s *Stack) PushAt(modal reactea.Component, placement Placement) tea.Cmd {
 	return func() tea.Msg { return pushMsg{target: s, modal: modal, placement: placement} }
 }
 
-// A push names the stack it was asked of. Without that the outermost stack in
-// the tree would take every one, since it sees the message first.
+// A push names its target stack so nested stacks route it precisely.
 type pushMsg struct {
 	target    *Stack
 	modal     reactea.Component
@@ -253,8 +251,8 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		}
 	}
 
-	// A modal blocks input, not data: the base keeps receiving its own ticks and
-	// async results while a modal is up, or its work would stall unfinishable.
+	// The active modal receives input while the base continues receiving ticks
+	// and asynchronous results.
 	if top := s.top(); top != nil && reactea.IsInput(msg) {
 		modalCtx := s.modalCtx(ctx, top)
 
@@ -287,8 +285,7 @@ func (s *Stack) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 }
 
 func (s *Stack) Render(ctx *reactea.Ctx) string {
-	// The base does not hold the focus while a modal is up — that is already true
-	// of its input, and it is what keeps its cursor from showing through.
+	// The active modal owns focus and cursor while the base continues rendering.
 	ctx = s.baseCtx(ctx)
 
 	base := s.base.Render(ctx.WithFocus(len(s.modals) == 0))
@@ -307,8 +304,7 @@ func (s *Stack) Render(ctx *reactea.Ctx) string {
 		box := s.modalCtx(ctx, modal)
 		boxWidth, boxHeight := box.Size()
 
-		// Fitting is what makes a layer opaque: padded blanks cover the base, and
-		// an overrunning modal cannot stretch the stack past its own box.
+		// Fitting makes a layer opaque and confines it to the stack's box.
 		content := render.Fit(modal.component.Render(box), boxWidth, boxHeight)
 
 		layers = append(layers, lipgloss.NewLayer(content).X(x).Y(y).Z(i+1))

@@ -43,8 +43,8 @@ func (f *Frame) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
 
 		msg = reactea.TranslateMouse(msg, innerX-outerX, innerY-outerY)
 
-		// A click on the border is not a click on the child. Box hit-tests before
-		// it routes, so dropping here keeps the two containers consistent.
+		// The inner box accepts child clicks; the border absorbs the rest. Box uses
+		// the same hit-test rule.
 		if _, _, inside := reactea.Mouse(inner, msg); !inside {
 			return nil
 		}
@@ -71,8 +71,7 @@ func (f *Frame) Render(ctx *reactea.Ctx) string {
 	inner := f.inner(ctx)
 	innerWidth, innerHeight := inner.Size()
 
-	// Trim the child to the inner box first. Trimming the framed result instead
-	// would cut the border off whichever side overran.
+	// Fit the child before framing to preserve every border edge.
 	content := render.Fit(f.component.Render(inner), innerWidth, innerHeight)
 
 	return f.current(ctx).

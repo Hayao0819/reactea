@@ -7,7 +7,7 @@ import (
 	"github.com/Hayao0819/reactea/v2"
 )
 
-// Memoized reuses a child's last render while nothing it draws from has changed.
+// Memoized reuses a child's render for a stable key, size and focus state.
 type Memoized struct {
 	child reactea.Component
 	key   func() any
@@ -18,23 +18,19 @@ type Memoized struct {
 	valid         bool
 }
 
-// Memo caches the child's render and reuses it while key returns the same value
-// and the box and the focus stay as they were. Init and Update always run: only
-// drawing is skipped, so the child's state is never stale — its picture is
-// merely reused.
+// Memo caches the child's render while key, box and focus remain stable. Init
+// and Update continue to run while the cached picture is reused.
 //
 // key is what the child draws from, reduced to something comparable: a
-// generation counter, a timestamp, the length of a slice. A key the cache cannot
-// compare is a key it cannot trust, so the child is drawn again.
+// generation counter, a timestamp or the length of a slice. An uncomparable key
+// triggers a fresh render.
 //
-// A focused child is never cached. Only a focused component may set the cursor,
-// and the cursor is set while drawing, so skipping its Render would take the
-// cursor away with it.
+// A focused child renders every frame so it can report its cursor.
 func Memo(child reactea.Component, key func() any) *Memoized {
 	return &Memoized{child: child, key: key}
 }
 
-// Invalidate drops the cache, for a change the key cannot see.
+// Invalidate drops the cache after an external visual change.
 func (m *Memoized) Invalidate() { m.valid = false }
 
 func (m *Memoized) Init(ctx *reactea.Ctx) tea.Cmd { return m.child.Init(ctx) }
@@ -65,8 +61,8 @@ func (m *Memoized) Render(ctx *reactea.Ctx) string {
 
 	rendered := m.child.Render(ctx)
 
-	// Only an unfocused render is worth keeping: a focused one carries the focused
-	// styling, which would be wrong the moment the focus moves on.
+	// Cache unfocused output. Focused output is tied to the current focus and may
+	// report a cursor.
 	if ctx.Focused() {
 		m.valid = false
 

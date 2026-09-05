@@ -12,15 +12,14 @@ import (
 	"github.com/Hayao0819/reactea/v2/layout"
 )
 
-// A component with no state is a function.
+// A stateless component is a function.
 func label(text string) reactea.Component {
 	return reactea.Func(func(ctx *reactea.Ctx) string {
 		return fmt.Sprintf("%s (%d wide)", text, ctx.Width())
 	})
 }
 
-// One with state embeds BasicComponent and writes only what differs. Render is
-// the only method it must have.
+// A stateful component can embed BasicComponent and implement Render.
 type clock struct {
 	reactea.BasicComponent
 

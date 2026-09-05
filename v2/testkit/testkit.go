@@ -1,5 +1,4 @@
-// Package testkit is the glue a test writes around an App: the terminal
-// specifics that every application repeats and none of them differ on.
+// Package testkit provides terminal-specific helpers for testing an App.
 package testkit
 
 import (
@@ -26,10 +25,9 @@ func SendKeys(app *reactea.App, keys ...string) {
 	}
 }
 
-// Key builds one press, spelled the way tea.KeyPressMsg.String does: modifier
-// prefixes, then a name or a single character. A shifted letter is its capital,
-// not "shift+" and the letter, which is how the terminal reports it. It panics
-// when key is neither a known name nor one character.
+// Key builds one press using tea.KeyPressMsg.String syntax: modifier prefixes,
+// then a name or a single character. Terminals report a shifted letter as its
+// capital form. Key panics for an unknown multi-character name.
 func Key(key string) tea.KeyPressMsg {
 	press := tea.KeyPressMsg{}
 
@@ -111,8 +109,7 @@ func Wheel(app *reactea.App, x, y, amount int) {
 	}
 }
 
-// RenderAt draws the app at a size without going through the terminal, for a
-// test about layout rather than about input.
+// RenderAt resizes and draws the app in process for layout assertions.
 func RenderAt(app *reactea.App, width, height int) string {
 	app.Send(tea.WindowSizeMsg{Width: width, Height: height})
 

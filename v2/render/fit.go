@@ -1,5 +1,4 @@
-// Package render holds the drawing rules the containers share, in terminal
-// display cells rather than bytes or runes.
+// Package render provides terminal display-cell fitting shared by containers.
 package render
 
 import (
@@ -8,11 +7,10 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Fit pads or trims content to the box its component was given. Containers apply
-// it before composing, so a child that draws short or long shifts nothing else.
+// Fit pads or trims content exactly to its component box.
 func Fit(content string, width, height int) string {
-	// Lipgloss reads MaxWidth(0) and MaxHeight(0) as unset, so a component handed
-	// no cells has to be emptied here rather than trimmed there.
+	// Lipgloss treats zero maxima as unset, so zero-sized boxes produce their
+	// empty output here.
 	if width <= 0 || height <= 0 {
 		return ""
 	}
@@ -27,10 +25,8 @@ func Fit(content string, width, height int) string {
 		Render(content)
 }
 
-// Left fits one line to exactly width cells, counting what the terminal shows
-// rather than bytes or escape sequences. Padding comes after the trim as well as
-// instead of it: a double-width character cannot half-fit, so trimming to an odd
-// width leaves a cell over.
+// Left fits one line to exactly width terminal cells. It trims by display width
+// and pads any cell left after clipping a double-width character.
 func Left(text string, width int) string {
 	if width <= 0 {
 		return ""
