@@ -4,18 +4,18 @@
 
 [![Latest](https://img.shields.io/github/v/tag/Hayao0819/reactea?label=latest)](https://img.shields.io/github/v/tag/Hayao0819/reactea?label=latest)
 [![build](https://github.com/Hayao0819/reactea/actions/workflows/build.yml/badge.svg)](https://github.com/Hayao0819/reactea/actions/workflows/build.yml)
-![Codecov](https://img.shields.io/codecov/c/github/Londek/reactea)
+![Codecov](https://img.shields.io/codecov/c/github/Hayao0819/reactea)
 [![Go Reference](https://pkg.go.dev/badge/github.com/Hayao0819/reactea.svg)](https://pkg.go.dev/github.com/Hayao0819/reactea)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Hayao0819/reactea)](https://goreportcard.com/report/github.com/Hayao0819/reactea)
 
-<p align="center">With the release of bubbletea v2 I'm archiving this project - it's not actively maintained anymore</p>
+<p align="center">Upstream development has ended. This fork maintains v1 with bug fixes and develops a redesigned <a href="./v2/">v2</a> for Bubble Tea v2.</p>
 
 Rather simple **Bubbletea companion** for **handling hierarchy**, support for **lifting state up.**\
 It Reactifies Bubbletea philosophy and makes it especially easy to work with in bigger projects.
 
 For me, personally - **It's a must** in project with multiple pages and component communication
 
-Check our quickstart [right here](#quickstart) or other examples [here!](/examples)
+Check our quickstart [right here](#quickstart) or other examples [here!](./examples)
 
 `go get -u github.com/Hayao0819/reactea`
 </div>
@@ -36,9 +36,7 @@ Most info is currently in source code so I suggest checking it out
 
 Always return `reactea.Destroy` instead of `tea.Quit` in order to follow our convention (that way Destroy() will be called on your components)
 
-As of now Go doesn't support type aliases for generics, so `Renderer[TProps]` has to be explicitly casted.
-
-## [Quickstart](/examples/quickstart)
+## [Quickstart](./examples/quickstart)
 
 Reactea unlike Bubbletea implements two-way communication, very React-like communication.\
 If you have experience with React you are gonna love Reactea straight away!
@@ -52,7 +50,7 @@ In this tutorial we are going to make application that consists of 2 pages.
 
 More detailed docs about component lifecycle can be found [here](#component-lifecycle), we are only gonna go through basics.
 
-Reactea component lifecycle consists of 6 methods (while Bubbletea only 3)
+Reactea component lifecycle consists of 4 methods (while Bubbletea only 3)
 |Method|Purpose|
 |-|-|
 | `Init() tea.Cmd` | It's called first. All critical stuff should happen here. It also supports IO through tea.Cmd |
@@ -121,7 +119,7 @@ import (
 type Props = string
 
 // Stateless components?!?!
-func Renderer(text Props, width, height int) string {
+func Render(text Props, width, height int) string {
     return fmt.Sprintf("OMG! Hello %s!", text)
 }
 ```
@@ -134,20 +132,16 @@ func Renderer(text Props, width, height int) string {
 type Component struct {
     reactea.BasicComponent                // It implements all reactea's core functionalities
 
-    mainRouter reactea.Component[router.Props]      // Our router
+    mainRouter *router.Component
 
     text string // The name
 }
 
 func New() *Component {
-    return &Component{
-        mainRouter: router.New(),
-    }
-}
+    c := &Component{}
 
-func (c *Component) Init(reactea.NoProps) tea.Cmd {
     // Does it remind you of something? react-router!
-    return c.mainRouter.Init(map[string]router.RouteInitializer{
+    c.mainRouter = router.NewWithRoutes(router.Routes{
         "default": func(router.Params) reactea.Component {
 			component := input.New()
 
@@ -161,6 +155,12 @@ func (c *Component) Init(reactea.NoProps) tea.Cmd {
 			return reactea.Componentify(displayname.Render, c.text)
 		},
     })
+
+    return c
+}
+
+func (c *Component) Init() tea.Cmd {
+    return c.mainRouter.Init()
 }
 
 func (c *Component) Update(msg tea.Msg) tea.Cmd {
@@ -202,7 +202,7 @@ if _, err := program.Run(); err != nil {
 
 ![Component lifecycle image](.github/lifecycle-diagram.png)
 
-Reactea component lifecycle consists of 6 methods (while Bubbletea only 3)
+Reactea component lifecycle consists of 4 methods (while Bubbletea only 3)
 |Method|Purpose|
 |-|-|
 | `Init() tea.Cmd` | It's called first. All critical stuff should happen here. It also supports IO through tea.Cmd |
@@ -257,13 +257,12 @@ Note that params support wildcards with single `:`, like `/teams/:/player`. `/te
 
 ## Router Component
 
-Router Component is basic implementation of how routing could look in your application.
-It doesn't support wildcards yet or relative pathing. All data is provided from within props
+`router.Component` is a basic router. Give it routes with `router.NewWithRoutes(router.Routes{...})` or the `Routes` field on `New()`.
 
-### router.Props
+It matches route placeholders, including the params and wildcards described above. When more than one placeholder matches, the most specific wins: literal segments beat params, which beat catch-alls. Relative navigation is a separate concern, handled by `reactea.Navigate`.
 
-router.Props is a map of route initializers keyed by routes
+### router.Routes
 
-What is `RouteInitializer`?
+`router.Routes` is `map[string]RouteInitializer` keyed by route placeholder.
 
-`RouteInitializer` is function that initializes the current route component
+`RouteInitializer` is a `func(router.Params) reactea.Component` that builds the component for a matched route.
