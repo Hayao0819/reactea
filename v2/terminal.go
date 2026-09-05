@@ -15,13 +15,13 @@ func terminalCmd(apply func(*tea.View)) tea.Cmd {
 }
 
 // EnterAltScreen puts the program in the alternate screen buffer.
-func EnterAltScreen() tea.Msg {
-	return terminalMsg{apply: func(view *tea.View) { view.AltScreen = true }}
+func EnterAltScreen() tea.Cmd {
+	return terminalCmd(func(view *tea.View) { view.AltScreen = true })
 }
 
 // ExitAltScreen returns to the normal screen buffer.
-func ExitAltScreen() tea.Msg {
-	return terminalMsg{apply: func(view *tea.View) { view.AltScreen = false }}
+func ExitAltScreen() tea.Cmd {
+	return terminalCmd(func(view *tea.View) { view.AltScreen = false })
 }
 
 // SetWindowTitle sets the terminal window title.

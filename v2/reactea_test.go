@@ -185,7 +185,7 @@ func TestCtxInsetClampsToTheParent(t *testing.T) {
 func TestTerminalCommandsPersistAcrossFrames(t *testing.T) {
 	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 3))
 
-	app.Update(reactea.EnterAltScreen())
+	app.Update(reactea.EnterAltScreen()())
 	app.Update(reactea.SetWindowTitle("reactea")())
 
 	for frame := range 3 {
@@ -200,7 +200,7 @@ func TestTerminalCommandsPersistAcrossFrames(t *testing.T) {
 		}
 	}
 
-	app.Update(reactea.ExitAltScreen())
+	app.Update(reactea.ExitAltScreen()())
 
 	if app.View().AltScreen {
 		t.Error("ExitAltScreen did not take")
