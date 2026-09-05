@@ -9,18 +9,30 @@ import (
 	"github.com/Hayao0819/reactea/v2"
 )
 
-type Params = map[string]string
-
+// RouteInitializer builds the component for one matched route.
 type RouteInitializer func(Params) reactea.Component
 
+// Routes maps patterns to component constructors. "default" is the fallback.
 type Routes = map[string]RouteInitializer
+
+// ReloadMode says what SetRoutes does about the page already on screen.
+type ReloadMode int
+
+const (
+	// PreserveCurrent leaves a mounted page alone while its route still resolves
+	// to the same entry, which is what a table that only ever grows wants.
+	PreserveCurrent ReloadMode = iota
+
+	// RemountCurrent tears the page down and builds it again from the new table.
+	RemountCurrent
+)
 
 // Component renders whichever route matches, remounting when the match changes.
 type Component struct {
-	Routes Routes
-
 	// NotFound renders when nothing matched and there is no "default" route.
 	NotFound reactea.RenderFunc
+
+	routes Routes
 
 	current     reactea.Component
 	scope       *reactea.Scope
@@ -28,9 +40,30 @@ type Component struct {
 	params      Params
 }
 
+// New builds an empty router whose routes can be supplied with SetRoutes.
 func New() *Component { return &Component{} }
 
-func NewWithRoutes(routes Routes) *Component { return &Component{Routes: routes} }
+// NewWithRoutes builds a router from routes.
+func NewWithRoutes(routes Routes) *Component { return &Component{routes: routes} }
+
+// SetRoutes replaces the table. It takes no Ctx because a table is often built
+// before anything is mounted; RemountCurrent takes effect on the next Update.
+func (c *Component) SetRoutes(routes Routes, mode ReloadMode) {
+	c.routes = routes
+
+	if mode == RemountCurrent {
+		c.Unmount()
+	}
+}
+
+// Reload rebuilds the page in this update, so the frame Bubble Tea draws next
+// has one. Unmounting alone would leave the router empty until a message
+// arrived.
+func (c *Component) Reload(ctx *reactea.Ctx) tea.Cmd {
+	c.Unmount()
+
+	return c.sync(ctx)
+}
 
 // Current is the routed component, or nil when nothing matched.
 func (c *Component) Current() reactea.Component { return c.current }
@@ -59,7 +92,7 @@ func (c *Component) Unmount() {
 		c.scope = nil
 	}
 
-	c.current, c.placeholder, c.params = nil, "", nil
+	c.current, c.placeholder, c.params = nil, "", Params{}
 }
 
 func (c *Component) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
@@ -121,22 +154,24 @@ func (c *Component) resolve(route string) (string, RouteInitializer, Params, boo
 		return placeholder, initializer, params, true
 	}
 
-	if initializer, ok := c.Routes["default"]; ok {
-		return "default", initializer, nil, true
+	if initializer, ok := c.routes["default"]; ok {
+		return "default", initializer, Params{path: route}, true
 	}
 
-	return "", nil, nil, false
+	return "", nil, Params{}, false
 }
 
-// sameParams compares what the page was mounted with, ignoring "$" (the whole
-// route) and whatever a trailing catch-all swallowed: both belong to whatever is
-// nested below, not to this page.
+// sameParams ignores a trailing catch-all because it belongs to the nested page.
 func sameParams(a, b Params, placeholder string) bool {
-	owned := func(params Params) map[string]string {
-		mine := make(map[string]string, len(params))
+	if placeholder == "default" {
+		return a.path == b.path
+	}
 
-		for key, value := range params {
-			if key != "$" && key != catchAllName(placeholder) {
+	owned := func(params Params) map[string]string {
+		mine := make(map[string]string, len(params.values))
+
+		for key, value := range params.values {
+			if key != catchAllName(placeholder) {
 				mine[key] = value
 			}
 		}
@@ -163,11 +198,11 @@ func catchAllName(placeholder string) string {
 	levels := strings.Split(placeholder, "/")
 
 	last := levels[len(levels)-1]
-	if !strings.HasPrefix(last, "+?:") {
+	if !strings.HasPrefix(last, "*") {
 		return ""
 	}
 
-	return last[3:]
+	return last[1:]
 }
 
 func (c *Component) match(route string) (string, RouteInitializer, Params, bool) {
@@ -180,12 +215,12 @@ func (c *Component) match(route string) (string, RouteInitializer, Params, bool)
 		found           bool
 	)
 
-	for placeholder, initializer := range c.Routes {
+	for placeholder, initializer := range c.routes {
 		if placeholder == "default" {
 			continue
 		}
 
-		params, ok := reactea.MatchRoute(route, placeholder)
+		params, ok := Match(route, placeholder)
 		if !ok {
 			continue
 		}
@@ -215,9 +250,9 @@ func specificity(placeholder string) []int {
 
 	for i, level := range levels {
 		switch {
-		case strings.HasPrefix(level, "+?:"):
+		case strings.HasPrefix(level, "*"):
 			score[i] = 0
-		case strings.HasPrefix(level, "?:"):
+		case strings.HasPrefix(level, ":") && strings.HasSuffix(level, "?"):
 			score[i] = 1
 		case strings.HasPrefix(level, ":"):
 			score[i] = 2
@@ -257,5 +292,5 @@ func Page[TComponent reactea.Component](construct func() TComponent) RouteInitia
 
 // Param adapts a constructor that takes one route param by name.
 func Param[TComponent reactea.Component](name string, construct func(string) TComponent) RouteInitializer {
-	return func(params Params) reactea.Component { return construct(params[name]) }
+	return func(params Params) reactea.Component { return construct(params.Get(name)) }
 }

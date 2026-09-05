@@ -69,6 +69,29 @@ func TestFallsBackToDefault(t *testing.T) {
 	}
 }
 
+func TestDefaultRouteReceivesAndTracksThePath(t *testing.T) {
+	routes := router.Routes{
+		"default": func(params router.Params) reactea.Component {
+			return &page{label: params.Path()}
+		},
+	}
+
+	component := router.NewWithRoutes(routes)
+	app := reactea.New(component, reactea.WithRoute("/first"), reactea.WithSize(20, 5))
+	app.Init()
+
+	if got := app.View().Content; !strings.Contains(got, "/first") {
+		t.Fatalf("content = %q, want first path", got)
+	}
+
+	_, cmd := app.Update(app.Ctx().SetRoute("/second")())
+	app.Update(cmd())
+
+	if got := app.View().Content; !strings.Contains(got, "/second") {
+		t.Errorf("content = %q, want updated path", got)
+	}
+}
+
 func TestNotFound(t *testing.T) {
 	content, _ := render(t, pages(map[string]string{"/known": "KNOWN"}), "/unknown")
 
@@ -95,7 +118,7 @@ func TestNotFoundIsOverridable(t *testing.T) {
 func TestParamsReachThePage(t *testing.T) {
 	routes := router.Routes{
 		"/team/:id": func(params router.Params) reactea.Component {
-			return &page{label: fmt.Sprintf("team %s", params["id"])}
+			return &page{label: fmt.Sprintf("team %s", params.Get("id"))}
 		},
 	}
 
@@ -228,8 +251,8 @@ func (c *countingPage) Update(*reactea.Ctx, tea.Msg) tea.Cmd {
 // sub-route move.
 func TestUnchangedMatchKeepsThePageMounted(t *testing.T) {
 	routes := router.Routes{
-		"/team/:id/+?:rest": func(params router.Params) reactea.Component {
-			return &page{label: "team " + params["id"]}
+		"/team/:id/*rest": func(params router.Params) reactea.Component {
+			return &page{label: "team " + params.Get("id")}
 		},
 	}
 
@@ -371,5 +394,106 @@ func TestTabDescendsIntoARoutedPage(t *testing.T) {
 
 	if len(reached) != 2 || reached[0] != 0 || reached[1] != 1 {
 		t.Errorf("Tab reached panes %v, want both of them", reached)
+	}
+}
+
+// counted names every page it builds, so a test can tell a rebuild from a page
+// that was left where it was.
+func counted(label string, built *int) router.Routes {
+	return router.Routes{
+		"default": func(router.Params) reactea.Component {
+			*built++
+
+			return &page{label: label}
+		},
+	}
+}
+
+func TestReloadBuildsThePageBeforeTheNextFrame(t *testing.T) {
+	var built int
+
+	component := router.NewWithRoutes(counted("one", &built))
+
+	app := reactea.New(component, reactea.WithSize(20, 5))
+	app.Start()
+
+	if built != 1 {
+		t.Fatalf("the first mount built %d pages", built)
+	}
+
+	component.SetRoutes(counted("two", &built), router.PreserveCurrent)
+
+	if cmd := component.Reload(app.Ctx()); cmd != nil {
+		app.Send(cmd())
+	}
+
+	if built != 2 {
+		t.Errorf("Reload built %d pages in total, want 2", built)
+	}
+
+	if got := app.View().Content; !strings.Contains(got, "two") {
+		t.Errorf("the frame after Reload reads %q; the router was left empty", got)
+	}
+}
+
+func TestPreserveCurrentLeavesAMountedPageAlone(t *testing.T) {
+	var built int
+
+	component := router.NewWithRoutes(counted("one", &built))
+
+	app := reactea.New(component, reactea.WithSize(20, 5))
+	app.Start()
+
+	component.SetRoutes(counted("two", &built), router.PreserveCurrent)
+	app.Send(tea.KeyPressMsg{Code: 'x'})
+
+	if built != 1 {
+		t.Errorf("the page was rebuilt %d times; PreserveCurrent should have left it", built)
+	}
+
+	if got := app.View().Content; !strings.Contains(got, "one") {
+		t.Errorf("content = %q, want the page that was already up", got)
+	}
+}
+
+func TestRemountCurrentRebuildsFromTheNewTable(t *testing.T) {
+	var built int
+
+	component := router.NewWithRoutes(counted("one", &built))
+
+	app := reactea.New(component, reactea.WithSize(20, 5))
+	app.Start()
+
+	component.SetRoutes(counted("two", &built), router.RemountCurrent)
+	app.Send(tea.KeyPressMsg{Code: 'x'})
+
+	if built != 2 {
+		t.Errorf("the page was built %d times in total, want 2", built)
+	}
+
+	if got := app.View().Content; !strings.Contains(got, "two") {
+		t.Errorf("content = %q, want the page from the new table", got)
+	}
+}
+
+// Dropping the route that is up must not leave the old page on screen.
+func TestTakingAwayTheMountedRouteFallsBack(t *testing.T) {
+	component := router.NewWithRoutes(pages(map[string]string{
+		"/one":    "ONE",
+		"default": "HOME",
+	}))
+
+	app := reactea.New(component, reactea.WithSize(20, 5), reactea.WithRoute("/one"))
+	app.Start()
+
+	if got := app.View().Content; !strings.Contains(got, "ONE") {
+		t.Fatalf("content = %q, want ONE", got)
+	}
+
+	component.SetRoutes(pages(map[string]string{"default": "HOME"}), router.RemountCurrent)
+	app.Send(tea.KeyPressMsg{Code: 'x'})
+
+	if got := app.View().Content; !strings.Contains(got, "HOME") {
+		t.Errorf("content = %q, want the fallback", got)
 	}
 }

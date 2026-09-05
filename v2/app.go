@@ -292,7 +292,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) applyRoute(request routeRequestMsg) tea.Cmd {
 	target := request.target
 	if request.relative {
-		target = Resolve(a.route, target)
+		target = resolveRoute(a.route, target)
 	}
 
 	if target == "" || target[0] != '/' {
