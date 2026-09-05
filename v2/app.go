@@ -1,6 +1,8 @@
 package reactea
 
 import (
+	"sync"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -36,8 +38,14 @@ type App struct {
 	terminal tea.View
 	cursor   *tea.Cursor
 
-	captures int
 	tornDown bool
+
+	// A scope-bound claim is released wherever its scope closes, which need not
+	// be the event loop reading the count.
+	capturesMu sync.Mutex
+	captures   int
+
+	reverseBatches bool
 
 	width, height int
 }
@@ -167,7 +175,19 @@ func (a *App) Run(options ...tea.ProgramOption) error {
 func (a *App) Route() string { return a.route }
 
 // InputCaptured reports whether something below has claimed the keys.
-func (a *App) InputCaptured() bool { return a.captures > 0 }
+func (a *App) InputCaptured() bool {
+	a.capturesMu.Lock()
+	defer a.capturesMu.Unlock()
+
+	return a.captures > 0
+}
+
+func (a *App) addCapture(delta int) {
+	a.capturesMu.Lock()
+	defer a.capturesMu.Unlock()
+
+	a.captures = max(0, a.captures+delta)
+}
 
 // Scope is the app's root scope. It closes when the program ends.
 func (a *App) Scope() *Scope { return a.scope }
@@ -239,17 +259,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case captureMsg:
-		if msg.held != nil {
-			// The scope closed before the claim landed, so nobody is left to release
-			// it.
-			if msg.held.dead {
-				return a, nil
-			}
-
-			msg.held.held = true
-		}
-
-		a.captures = max(0, a.captures+msg.delta)
+		a.addCapture(int(msg))
 
 		return a, nil
 

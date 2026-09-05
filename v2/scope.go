@@ -53,11 +53,12 @@ func (s *Scope) Child() *Scope {
 	}
 
 	// Drop closed ones so a long-lived parent does not collect a scope per route
-	// change.
+	// change. Closed takes the child's own lock: a child can be closed from a
+	// command's goroutine while its parent opens a sibling here.
 	live := s.children[:0]
 
 	for _, existing := range s.children {
-		if !existing.closed {
+		if !existing.Closed() {
 			live = append(live, existing)
 		}
 	}

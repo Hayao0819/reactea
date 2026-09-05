@@ -1,6 +1,10 @@
 package reactea
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"sync"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // Input messages are the ones with an addressee: a keyboard message goes to
 // whatever holds focus, a mouse message to whatever sits under the pointer.
@@ -10,38 +14,80 @@ import tea "charm.land/bubbletea/v2"
 // Containers route on this distinction. It is what keeps a modal from starving
 // the page underneath it of its own results.
 
-// captureMsg moves the app's input-capture depth. held, when set, is what the
-// scope releases later.
-type captureMsg struct {
-	delta int
-	held  *capture
+type captureMsg int
+
+// CaptureInput declares that something below is taking the keys. Calls nest,
+// so each capture must be paired with ReleaseInput.
+func CaptureInput() tea.Msg { return captureMsg(1) }
+
+// ReleaseInput releases one unowned input capture.
+func ReleaseInput() tea.Msg { return captureMsg(-1) }
+
+// InputCapture owns one claim on global input. Its zero value is ready to use.
+type InputCapture struct {
+	state *inputCaptureState
 }
 
-// capture is one scope-bound claim on the keys.
-type capture struct {
-	app  *App
-	held bool
-	dead bool
+type inputCaptureState struct {
+	mu         sync.Mutex
+	app        *App
+	scope      *Scope
+	generation uint64
+	held       bool
 }
 
-func (c *capture) release() {
-	c.dead = true
+// CaptureInput claims global input until ReleaseInput is called or ctx's scope
+// closes. Repeated calls for the same scope do nothing.
+func (c *InputCapture) CaptureInput(ctx *Ctx) tea.Cmd {
+	if c.state == nil {
+		c.state = &inputCaptureState{}
+	}
+	state := c.state
 
-	if !c.held {
+	state.mu.Lock()
+	if state.held && state.app == ctx.app && state.scope == ctx.scope {
+		state.mu.Unlock()
+
+		return nil
+	}
+
+	if state.held {
+		state.app.addCapture(-1)
+	}
+
+	state.generation++
+	generation := state.generation
+	state.app, state.scope, state.held = ctx.app, ctx.scope, true
+	state.app.addCapture(1)
+	state.mu.Unlock()
+
+	ctx.scope.OnDestroy(func() { state.release(generation) })
+
+	return nil
+}
+
+// ReleaseInput releases this capture. Repeated calls do nothing.
+func (c *InputCapture) ReleaseInput() tea.Cmd {
+	if c.state == nil {
+		return nil
+	}
+
+	c.state.release(0)
+
+	return nil
+}
+
+func (c *inputCaptureState) release(generation uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.held || generation != 0 && c.generation != generation {
 		return
 	}
 
 	c.held = false
-	c.app.captures = max(0, c.app.captures-1)
+	c.app.addCapture(-1)
 }
-
-// CaptureInput declares that something below is taking the keys — a text field
-// in filter mode, a modal. Global key handling at the root stands down until the
-// matching ReleaseInput. Calls nest, so they must be paired.
-func CaptureInput() tea.Msg { return captureMsg{delta: 1} }
-
-// ReleaseInput undoes one CaptureInput.
-func ReleaseInput() tea.Msg { return captureMsg{delta: -1} }
 
 // IsKeyboard reports whether msg is a key or paste event.
 func IsKeyboard(msg tea.Msg) bool {

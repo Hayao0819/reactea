@@ -371,31 +371,32 @@ func TestProgressBarAndBracketedPaste(t *testing.T) {
 
 func TestInputCaptureNests(t *testing.T) {
 	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+	var first, second reactea.InputCapture
 
 	if app.InputCaptured() {
 		t.Fatal("input was captured before anything asked")
 	}
 
-	app.Update(reactea.CaptureInput())
-	app.Update(reactea.CaptureInput())
+	first.CaptureInput(app.Ctx())
+	second.CaptureInput(app.Ctx())
 
 	if !app.Ctx().InputCaptured() {
 		t.Error("the Ctx did not see the capture")
 	}
 
-	app.Update(reactea.ReleaseInput())
+	first.ReleaseInput()
 
 	if !app.InputCaptured() {
 		t.Error("one release cleared two captures")
 	}
 
-	app.Update(reactea.ReleaseInput())
+	second.ReleaseInput()
 
 	if app.InputCaptured() {
 		t.Error("the capture was not released")
 	}
 
-	app.Update(reactea.ReleaseInput())
+	second.ReleaseInput()
 
 	if app.InputCaptured() {
 		t.Error("an unbalanced release went negative")
@@ -406,8 +407,9 @@ func TestScopedCaptureIsReleasedWithItsScope(t *testing.T) {
 	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
 
 	page := app.Scope().Child()
+	var capture reactea.InputCapture
 
-	app.Update(app.Ctx().WithScope(page).CaptureInput()())
+	capture.CaptureInput(app.Ctx().WithScope(page))
 
 	if !app.InputCaptured() {
 		t.Fatal("the capture did not take")
@@ -420,20 +422,22 @@ func TestScopedCaptureIsReleasedWithItsScope(t *testing.T) {
 	}
 }
 
-func TestAScopedCaptureThatNeverRanIsNotReleased(t *testing.T) {
+func TestReleasedScopeDoesNotReleaseAnotherCapture(t *testing.T) {
 	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
-
-	app.Update(reactea.CaptureInput())
-
 	page := app.Scope().Child()
+	var first, second reactea.InputCapture
 
-	app.Ctx().WithScope(page).CaptureInput() // built, never run
+	first.CaptureInput(app.Ctx().WithScope(page))
+	first.ReleaseInput()
+	second.CaptureInput(app.Ctx())
 
 	page.Close()
 
 	if !app.InputCaptured() {
-		t.Error("an unused scoped capture released someone else's claim")
+		t.Error("closing an old scope released another owner's capture")
 	}
+
+	second.ReleaseInput()
 }
 
 func TestScopeSurvivesConcurrentRegistration(t *testing.T) {
@@ -462,19 +466,85 @@ func TestScopeSurvivesConcurrentRegistration(t *testing.T) {
 	}
 }
 
-func TestACaptureLandingAfterItsScopeClosedIsDropped(t *testing.T) {
+// Opening a child while a sibling closes used to read the sibling's closed flag
+// without its lock, which -race catches.
+func TestScopeSurvivesChildrenOpeningAndClosingAtOnce(t *testing.T) {
+	root := reactea.NewScope()
+
+	var wg sync.WaitGroup
+
+	for range 50 {
+		wg.Go(func() { root.Child() })
+		wg.Go(func() { root.Child().Close() })
+	}
+
+	wg.Wait()
+	root.Close()
+}
+
+// A scope-bound claim is released wherever its scope closes, which need not be
+// the loop reading the count. -race catches an unguarded counter.
+func TestReleasingACaptureOffTheLoopDoesNotRaceTheCount(t *testing.T) {
 	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
 
 	page := app.Scope().Child()
+	var capture reactea.InputCapture
+	capture.CaptureInput(app.Ctx().WithScope(page))
 
-	claim := app.Ctx().WithScope(page).CaptureInput()
+	var wg sync.WaitGroup
 
-	page.Close()
+	wg.Go(page.Close)
+	wg.Go(func() { _ = app.InputCaptured() })
 
-	app.Update(claim())
+	wg.Wait()
 
 	if app.InputCaptured() {
-		t.Error("a claim that landed after its scope closed was honoured")
+		t.Error("closing the scope left the keys claimed")
+	}
+}
+
+func TestCaptureOnAClosedScopeIsDropped(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+
+	page := app.Scope().Child()
+	page.Close()
+
+	var capture reactea.InputCapture
+	capture.CaptureInput(app.Ctx().WithScope(page))
+
+	if app.InputCaptured() {
+		t.Error("a closed scope kept the input captured")
+	}
+}
+
+func TestCaptureIsIdempotent(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+	var capture reactea.InputCapture
+
+	capture.CaptureInput(app.Ctx())
+	capture.CaptureInput(app.Ctx())
+	capture.ReleaseInput()
+
+	if app.InputCaptured() {
+		t.Error("capturing twice required two releases")
+	}
+}
+
+func TestCopiedCaptureKeepsOneOwnershipClaim(t *testing.T) {
+	app := reactea.New(&probe{label: "x"}, reactea.WithSize(10, 2))
+	var capture reactea.InputCapture
+
+	capture.CaptureInput(app.Ctx())
+	alias := capture
+	alias.ReleaseInput()
+
+	if app.InputCaptured() {
+		t.Error("a copied capture could not release its ownership claim")
+	}
+
+	capture.ReleaseInput()
+	if app.InputCaptured() {
+		t.Error("releasing both aliases left an unbalanced capture")
 	}
 }
 
