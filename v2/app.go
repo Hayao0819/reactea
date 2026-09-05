@@ -27,9 +27,8 @@ type teardownMsg struct{ next tea.Msg }
 // variables, so two apps in one process never share a route. Commands go
 // straight back to Bubbletea, which already runs them under a panic guard.
 type App struct {
-	root    Component
-	program *tea.Program
-	scope   *Scope
+	root  Component
+	scope *Scope
 
 	route         string
 	previousRoute string
@@ -105,9 +104,7 @@ func New(root Component, options ...Option) *App {
 func (a *App) Program(options ...tea.ProgramOption) *tea.Program {
 	options = append(options, tea.WithFilter(a.filter))
 
-	a.program = tea.NewProgram(a, options...)
-
-	return a.program
+	return tea.NewProgram(a, options...)
 }
 
 // sendRounds bounds one Send, so a command that reschedules itself cannot spin
@@ -119,8 +116,8 @@ const sendRounds = 100
 // It is the loop a test would otherwise write by hand.
 //
 // Commands run inline: one that sleeps makes Send wait for it, so keep test
-// intervals short. A command that keeps rescheduling itself stops Send after a
-// hundred rounds rather than hanging it.
+// intervals short. A command that keeps rescheduling itself panics after a
+// hundred rounds rather than hanging the test.
 func (a *App) Send(msgs ...tea.Msg) {
 	pending := make([]tea.Cmd, 0, len(msgs))
 
@@ -132,30 +129,54 @@ func (a *App) Send(msgs ...tea.Msg) {
 	a.drain(pending...)
 }
 
+// ReverseBatches makes Send run the commands inside a tea.Batch back to front.
+// Bubble Tea promises no order among them, so a test that only ever sees them
+// in order can bake in an ordering production does not have.
+func (a *App) ReverseBatches(on bool) { a.reverseBatches = on }
+
 func (a *App) drain(pending ...tea.Cmd) {
-	for round := 0; round < sendRounds && len(pending) > 0; round++ {
-		cmd := pending[0]
-		pending = pending[1:]
-
-		if cmd == nil {
-			continue
+	for round := 0; len(pending) > 0; round++ {
+		if round == sendRounds {
+			panic("reactea: command chain did not settle")
 		}
 
-		produced := cmd()
+		current := pending
+		pending = nil
 
-		if batch, ok := produced.(tea.BatchMsg); ok {
-			pending = append(pending, batch...)
+		for _, cmd := range current {
+			if cmd == nil {
+				continue
+			}
 
-			continue
+			produced := cmd()
+
+			if batch, ok := produced.(tea.BatchMsg); ok {
+				pending = append(pending, a.order(batch)...)
+
+				continue
+			}
+
+			if produced == nil {
+				continue
+			}
+
+			_, next := a.Update(produced)
+			pending = append(pending, next)
 		}
-
-		if produced == nil {
-			continue
-		}
-
-		_, next := a.Update(produced)
-		pending = append(pending, next)
 	}
+}
+
+func (a *App) order(batch tea.BatchMsg) []tea.Cmd {
+	if !a.reverseBatches {
+		return batch
+	}
+
+	reversed := make([]tea.Cmd, 0, len(batch))
+	for i := len(batch) - 1; i >= 0; i-- {
+		reversed = append(reversed, batch[i])
+	}
+
+	return reversed
 }
 
 // Start runs Init and everything it produces, the way a program would before its

@@ -591,10 +591,39 @@ func TestSendRunsWhatItProduces(t *testing.T) {
 	}
 }
 
-type resched struct {
+type broadBatch struct {
 	reactea.BasicComponent
 
-	seen int
+	ran int
+}
+
+func (c *broadBatch) Init(*reactea.Ctx) tea.Cmd {
+	cmds := make([]tea.Cmd, 150)
+	for i := range cmds {
+		cmds[i] = func() tea.Msg {
+			c.ran++
+
+			return nil
+		}
+	}
+
+	return tea.Batch(cmds...)
+}
+
+func (c *broadBatch) Render(*reactea.Ctx) string { return "" }
+
+func TestStartRunsLargeFiniteBatch(t *testing.T) {
+	root := &broadBatch{}
+
+	reactea.New(root).Start()
+
+	if root.ran != 150 {
+		t.Errorf("batch ran %d commands, want 150", root.ran)
+	}
+}
+
+type resched struct {
+	reactea.BasicComponent
 }
 
 func (c *resched) Render(*reactea.Ctx) string { return "" }
@@ -604,21 +633,21 @@ func (c *resched) Update(_ *reactea.Ctx, msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	c.seen++
-
 	return func() tea.Msg { return stepMsg("again") }
 }
 
-func TestSendStopsACommandThatReschedulesItself(t *testing.T) {
+func TestSendRejectsACommandThatReschedulesItself(t *testing.T) {
 	root := &resched{}
 
 	app := reactea.New(root, reactea.WithSize(20, 1))
 
-	app.Send(stepMsg("again"))
+	defer func() {
+		if got := recover(); got != "reactea: command chain did not settle" {
+			t.Fatalf("Send panic = %v", got)
+		}
+	}()
 
-	if root.seen == 0 || root.seen > 200 {
-		t.Errorf("the loop ran %d times", root.seen)
-	}
+	app.Send(stepMsg("again"))
 }
 
 func TestScopeContextIsCancelledOnClose(t *testing.T) {
