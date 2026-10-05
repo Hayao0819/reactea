@@ -392,6 +392,38 @@ render.Clip(text, width)             // trim to width
 `Left` and `Right` trim by display width and then pad any remaining cell. This
 also handles clipping a double-width character at an odd boundary.
 
+## Loading data
+
+`state.Resource` holds a value loaded in the background along with its error
+and whether a load is in flight. Keep one in the component that shows it:
+
+```go
+type Profile struct {
+	reactea.BasicComponent
+
+	user state.Resource[User]
+}
+
+func (p *Profile) Init(ctx *reactea.Ctx) tea.Cmd {
+	return p.user.Load(ctx, func(ctx context.Context) (User, error) {
+		return api.User(ctx, p.id)
+	})
+}
+
+func (p *Profile) Update(ctx *reactea.Ctx, msg tea.Msg) tea.Cmd {
+	if p.user.Handle(msg) {
+		return nil
+	}
+	...
+}
+```
+
+The result reaches the whole tree like any async result, and `Handle` picks out
+the one addressed to this resource. Only the latest load lands: a new `Load`
+cancels the one in flight, and closing the component's scope cancels both. A
+failed load keeps the last value, so a page can show stale data next to the
+error.
+
 ## Wrapping Bubble Tea models and bubbles widgets
 
 Bubble Tea models and bubbles widgets expose different method signatures. A
