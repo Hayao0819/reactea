@@ -1,6 +1,8 @@
 package testkit_test
 
 import (
+	"image"
+	"slices"
 	"strings"
 	"testing"
 
@@ -104,5 +106,31 @@ func TestRenderAtResizesFirst(t *testing.T) {
 
 	if got := testkit.RenderAt(app, 6, 3); !strings.Contains(got, "xxxxxx") {
 		t.Errorf("RenderAt(6, 3) drew %q", got)
+	}
+}
+
+func TestFindCountsCellsNotBytes(t *testing.T) {
+	app := reactea.New(reactea.Text("╭─ ok ok\n日本 ok"), reactea.WithSize(20, 2))
+
+	want := []image.Point{{X: 3, Y: 0}, {X: 6, Y: 0}, {X: 5, Y: 1}}
+	if got := testkit.Find(app, "ok"); !slices.Equal(got, want) {
+		t.Errorf("Find = %v, want %v", got, want)
+	}
+}
+
+func TestClickTextAimsAtTheFirstMatch(t *testing.T) {
+	echo := &echoing{}
+	app := reactea.New(echo, reactea.WithSize(40, 1))
+
+	if !testkit.ClickText(app, "click") {
+		t.Fatal("ClickText missed text on screen")
+	}
+
+	if echo.click != "50" {
+		t.Errorf("clicked at %q, want 50", echo.click)
+	}
+
+	if testkit.ClickText(app, "absent") {
+		t.Error("ClickText reported a click on missing text")
 	}
 }

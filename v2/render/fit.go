@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Fit pads or trims content exactly to its component box.
@@ -63,4 +64,33 @@ func Clip(text string, width int) string {
 	}
 
 	return lipgloss.NewStyle().MaxWidth(width).Render(text)
+}
+
+// Ellipsize is Clip that marks a trimmed line with an ellipsis.
+func Ellipsize(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	return ansi.Truncate(text, width, "…")
+}
+
+// Sides puts left and right at the two edges of exactly width cells. When both
+// do not fit, right is kept and left is trimmed.
+func Sides(left, right string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	rightWidth := lipgloss.Width(right)
+
+	if gap := width - lipgloss.Width(left) - rightWidth; gap >= 1 {
+		return left + strings.Repeat(" ", gap) + right
+	}
+
+	if rightWidth >= width {
+		return Right(right, width)
+	}
+
+	return Left(left, width-rightWidth-1) + " " + right
 }

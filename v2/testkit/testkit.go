@@ -2,6 +2,7 @@
 package testkit
 
 import (
+	"image"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -95,6 +96,42 @@ var named = map[string]rune{
 // Click presses the left button at a point in the app's own coordinates.
 func Click(app *reactea.App, x, y int) {
 	app.Send(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
+}
+
+// Find returns every place text appears on screen, top to bottom, in display
+// cells rather than bytes.
+func Find(app *reactea.App, text string) []image.Point {
+	if text == "" {
+		return nil
+	}
+
+	var found []image.Point
+
+	for y, line := range Lines(app) {
+		for at := 0; ; {
+			index := strings.Index(line[at:], text)
+			if index < 0 {
+				break
+			}
+
+			found = append(found, image.Pt(ansi.StringWidth(line[:at+index]), y))
+			at += index + len(text)
+		}
+	}
+
+	return found
+}
+
+// ClickText clicks the first place text appears and reports whether it did.
+func ClickText(app *reactea.App, text string) bool {
+	found := Find(app, text)
+	if len(found) == 0 {
+		return false
+	}
+
+	Click(app, found[0].X, found[0].Y)
+
+	return true
 }
 
 // Wheel scrolls at a point. A negative amount is up.

@@ -59,3 +59,45 @@ func TestFitHoldsBothAxes(t *testing.T) {
 		t.Errorf("Fit gave %dx%d, want 5x4", width, height)
 	}
 }
+
+func TestEllipsizeMarksOnlyATrimmedLine(t *testing.T) {
+	if got := render.Ellipsize("abcdef", 4); got != "abc…" {
+		t.Errorf("Ellipsize trimmed to %q", got)
+	}
+
+	if got := render.Ellipsize("abc", 4); got != "abc" {
+		t.Errorf("Ellipsize changed a short line to %q", got)
+	}
+
+	if got := lipgloss.Width(render.Ellipsize("日本語", 4)); got > 4 {
+		t.Errorf("Ellipsize gave %d cells for 4", got)
+	}
+}
+
+func TestSidesFillsExactlyTheWidth(t *testing.T) {
+	cases := []struct {
+		name        string
+		left, right string
+		width       int
+		want        string
+	}{
+		{"both fit", "ab", "cd", 7, "ab   cd"},
+		{"left is trimmed", "abcdef", "cd", 6, "abc cd"},
+		{"right takes everything", "ab", "abcdef", 4, "abcd"},
+		{"wide characters", "日本語", "x", 5, "日  x"},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := render.Sides(test.left, test.right, test.width)
+
+			if got != test.want {
+				t.Errorf("Sides = %q, want %q", got, test.want)
+			}
+
+			if width := lipgloss.Width(got); width != test.width {
+				t.Errorf("Sides is %d cells wide, want %d", width, test.width)
+			}
+		})
+	}
+}

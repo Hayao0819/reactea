@@ -387,10 +387,13 @@ render.Fit(content, width, height)   // both axes, pad or trim
 render.Left(text, width)             // one line, exactly that wide
 render.Right(text, width)
 render.Clip(text, width)             // trim to width
+render.Ellipsize(text, width)        // trim to width, ending in "…"
+render.Sides(left, right, width)     // one line, left and right at the edges
 ```
 
 `Left` and `Right` trim by display width and then pad any remaining cell. This
-also handles clipping a double-width character at an odd boundary.
+also handles clipping a double-width character at an odd boundary. `Sides`
+keeps `right` whole and trims `left` when both do not fit.
 
 ## Loading data
 
@@ -529,7 +532,14 @@ if !strings.Contains(testkit.Plain(app), "3 results") {
 ```
 
 `Plain` strips the styling, `SendKeys` spells keys the way `KeyPressMsg.String`
-does, and `RenderAt` resizes before drawing.
+does, and `RenderAt` resizes before drawing. `Find` returns where text appears
+in display cells, and `ClickText` clicks the first match:
+
+```go
+if !testkit.ClickText(app, "Notifications") {
+	t.Fatal("no Notifications on screen")
+}
+```
 
 `App.ReverseBatches(true)` runs the commands inside every `tea.Batch` back to
 front. Bubble Tea permits either command order, so run ordering-sensitive tests
